@@ -131,7 +131,12 @@ jobs:
           elif [ "${{ steps.build_method.outputs.build_method }}" == "docker_compose" ]; then
             docker-compose build
           elif [ "${{ steps.build_method.outputs.build_method }}" == "docker" ]; then
-            docker build -t vyenfita:latest .
+            echo "=== DOCKER BUILD WITH REQUIRED ARGS ==="
+            echo "Building with BASE=ubuntu:22.04 as default..."
+            docker build \
+              --build-arg BASE=ubuntu:22.04 \
+              --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
+              -t vyenfita:latest .
           elif [ "${{ steps.build_method.outputs.build_method }}" == "manual" ]; then
             echo "=== MANUAL BUILD: npm install + mvn ==="
             echo "Installing frontend dependencies..."
