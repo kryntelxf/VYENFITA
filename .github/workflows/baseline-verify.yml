@@ -46,6 +46,25 @@ jobs:
           ls -la
 
           echo "=== BUILD FILES ==="
-          test -f package.json && echo "package.json: FOUND"
-          test -f Dockerfile && echo "Dockerfile: FOUND"
-          test -f pom.xml && echo "pom.xml: FOUND"
+
+          if [ -f package.json ]; then
+            echo "package.json: FOUND"
+          else
+            echo "package.json: NOT FOUND AT ROOT"
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "Dockerfile: FOUND"
+          else
+            echo "Dockerfile: NOT FOUND"
+            exit 1
+          fi
+
+          if [ -f pom.xml ]; then
+            echo "pom.xml: FOUND AT ROOT"
+          else
+            echo "pom.xml: NOT FOUND AT ROOT — searching repository..."
+            find . -name "pom.xml" -type f -print
+          fi
+
+          echo "=== VERIFICATION COMPLETE ==="
