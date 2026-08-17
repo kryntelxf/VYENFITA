@@ -1,10 +1,13 @@
-name: VYENFITA Build Discovery
+name: VYENFITA Build Verify
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
 
 jobs:
-  inspect:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -13,31 +16,139 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Inspect repository build configuration
+      - name: Show environment
         run: |
-          set -e
+          echo "=== ENVIRONMENT ==="
+          node --version
+          npm --version
+          java -version
+          docker --version
+          free -h
+          df -h
 
-          echo "=== ROOT ==="
+      - name: Inspect repository structure
+        run: |
+          echo "=== REPOSITORY STRUCTURE ==="
+          echo "Root directory contents:"
           ls -la
 
-          echo "=== SCRIPTS ==="
-          find scripts -maxdepth 3 -type f -print | sort
+          echo ""
+          echo "=== CHECKING FOR BUILD FILES ==="
+          echo "Looking for build.sh:"
+          find . -maxdepth 2 -name "build.sh" -type f || echo "build.sh: NOT FOUND"
 
-          echo "=== PACKAGE FILES ==="
-          find . -maxdepth 4 \
-            \( -name "package.json" -o -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -not -path "./.git/*" \
-            -print | sort
+          echo ""
+          echo "Looking for Dockerfile:"
+          find . -maxdepth 2 -name "Dockerfile" -type f || echo "Dockerfile: NOT FOUND"
 
-          echo "=== POSSIBLE BUILD DOCUMENTATION ==="
-          grep -RniE \
-            "build.sh|build command|build instructions|npm run build|mvn |gradle |docker build" \
-            README.md docs scripts 2>/dev/null | head -100 || true
+          echo ""
+          echo "Looking for docker-compose.yml:"
+          find . -maxdepth 2 -name "docker-compose.yml" -type f || echo "docker-compose.yml: NOT FOUND"
 
-          echo "=== GIT VERSION ==="
-          git rev-parse HEAD
+          echo ""
+          echo "Looking for package.json:"
+          find . -maxdepth 2 -name "package.json" -type f || echo "package.json: NOT FOUND"
 
-          echo "=== BRANCH ==="
-          git branch --show-current
+          echo ""
+          echo "Looking for pom.xml:"
+          find . -maxdepth 2 -name "pom.xml" -type f || echo "pom.xml: NOT FOUND"
 
-          echo "=== END DISCOVERY ==="
+          echo ""
+          echo "Looking for appsmith-server directory:"
+          ls -la appsmith-server 2>/dev/null || echo "appsmith-server: NOT FOUND"
+
+          echo ""
+          echo "Looking for appsmith-client directory:"
+          ls -la appsmith-client 2>/dev/null || echo "appsmith-client: NOT FOUND"
+
+          echo ""
+          echo "=== SCRIPTS DIRECTORY ==="
+          ls -la scripts 2>/dev/null || echo "scripts: NOT FOUND"
+
+      - name: Inspect build scripts
+        run: |
+          echo "=== BUILD SCRIPTS ==="
+          find scripts -maxdepth 2 -type f | sort 2>/dev/null || echo "No scripts directory found"
+
+          echo ""
+          echo "=== PACKAGE SCRIPTS ==="
+          if [ -f package.json ]; then
+            echo "package.json exists at root:"
+            grep -A30 '"scripts"' package.json || true
+          else
+            echo "package.json NOT FOUND at root"
+          fi
+
+          echo ""
+          echo "=== APP DIRECTORIES ==="
+          if [ -d app ]; then
+            echo "app directory found. Contents:"
+            ls -la app
+          else
+            echo "app directory NOT FOUND"
+          fi
+
+      - name: Determine build method
+        id: build_method
+        run: |
+          echo "=== DETERMINING BUILD METHOD ==="
+
+          if [ -f scripts/build.sh ]; then
+            echo "Method: scripts/build.sh"
+            echo "build_method=script" >> $GITHUB_OUTPUT
+          elif [ -f build.sh ]; then
+            echo "Method: build.sh"
+            echo "build_method=script" >> $GITHUB_OUTPUT
+          elif [ -f docker-compose.yml ]; then
+            echo "Method: docker-compose"
+            echo "build_method=docker_compose" >> $GITHUB_OUTPUT
+          elif [ -f Dockerfile ]; then
+            echo "Method: docker build"
+            echo "build_method=docker" >> $GITHUB_OUTPUT
+          elif [ -f package.json ] && [ -f pom.xml ]; then
+            echo "Method: npm + maven (no script)"
+            echo "build_method=manual" >> $GITHUB_OUTPUT
+          else
+            echo "BUILD BLOCKED — no build method identified"
+            echo "build_method=unknown" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Build with determined method
+        if: steps.build_method.outputs.build_method != 'unknown'
+        run: |
+          set -e
+          echo "=== STARTING VYENFITA BUILD ==="
+
+          if [ "${{ steps.build_method.outputs.build_method }}" == "script" ]; then
+            if [ -f scripts/build.sh ]; then
+              chmod +x scripts/build.sh
+              ./scripts/build.sh
+            elif [ -f build.sh ]; then
+              chmod +x build.sh
+              ./build.sh
+            fi
+          elif [ "${{ steps.build_method.outputs.build_method }}" == "docker_compose" ]; then
+            docker-compose build
+          elif [ "${{ steps.build_method.outputs.build_method }}" == "docker" ]; then
+            docker build -t vyenfita:latest .
+          elif [ "${{ steps.build_method.outputs.build_method }}" == "manual" ]; then
+            echo "=== MANUAL BUILD: npm install + mvn ==="
+            echo "Installing frontend dependencies..."
+            npm install
+            echo "Building backend..."
+            cd appsmith-server && mvn clean install -DskipTests
+            cd ..
+            echo "Building frontend..."
+            cd appsmith-client && npm install && npm run build
+            cd ..
+          else
+            echo "ERROR: Unhandled build method"
+            exit 1
+          fi
+
+      - name: Build result
+        run: |
+          echo "=== BUILD COMPLETED ==="
+          git rev-parse --short HEAD
+          git status --short
