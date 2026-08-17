@@ -1,13 +1,10 @@
-name: VYENFITA Build Verify
+name: VYENFITA Build Discovery
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - vyenfita-development
 
 jobs:
-  build:
+  inspect:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,44 +13,31 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show environment
-        run: |
-          echo "=== ENVIRONMENT ==="
-          node --version
-          npm --version
-          java -version
-          docker --version
-          free -h
-          df -h
-
-      - name: Inspect build scripts
-        run: |
-          echo "=== BUILD SCRIPTS ==="
-          find scripts -maxdepth 2 -type f | sort
-          echo "=== PACKAGE SCRIPTS ==="
-          if [ -f package.json ]; then
-            grep -A30 '"scripts"' package.json || true
-          fi
-
-      - name: Build
+      - name: Inspect repository build configuration
         run: |
           set -e
-          echo "=== STARTING VYENFITA BUILD ==="
 
-          if [ -f scripts/build.sh ]; then
-            chmod +x scripts/build.sh
-            ./scripts/build.sh
-          elif [ -f build.sh ]; then
-            chmod +x build.sh
-            ./build.sh
-          else
-            echo "No standard build script found."
-            echo "BUILD BLOCKED — inspect repository build instructions."
-            exit 1
-          fi
+          echo "=== ROOT ==="
+          ls -la
 
-      - name: Build result
-        run: |
-          echo "=== BUILD COMPLETED ==="
-          git rev-parse --short HEAD
-          git status --short
+          echo "=== SCRIPTS ==="
+          find scripts -maxdepth 3 -type f -print | sort
+
+          echo "=== PACKAGE FILES ==="
+          find . -maxdepth 4 \
+            \( -name "package.json" -o -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -not -path "./.git/*" \
+            -print | sort
+
+          echo "=== POSSIBLE BUILD DOCUMENTATION ==="
+          grep -RniE \
+            "build.sh|build command|build instructions|npm run build|mvn |gradle |docker build" \
+            README.md docs scripts 2>/dev/null | head -100 || true
+
+          echo "=== GIT VERSION ==="
+          git rev-parse HEAD
+
+          echo "=== BRANCH ==="
+          git branch --show-current
+
+          echo "=== END DISCOVERY ==="
