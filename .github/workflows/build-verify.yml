@@ -1,0 +1,59 @@
+name: VYENFITA Build Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show environment
+        run: |
+          echo "=== ENVIRONMENT ==="
+          node --version
+          npm --version
+          java -version
+          docker --version
+          free -h
+          df -h
+
+      - name: Inspect build scripts
+        run: |
+          echo "=== BUILD SCRIPTS ==="
+          find scripts -maxdepth 2 -type f | sort
+          echo "=== PACKAGE SCRIPTS ==="
+          if [ -f package.json ]; then
+            grep -A30 '"scripts"' package.json || true
+          fi
+
+      - name: Build
+        run: |
+          set -e
+          echo "=== STARTING VYENFITA BUILD ==="
+
+          if [ -f scripts/build.sh ]; then
+            chmod +x scripts/build.sh
+            ./scripts/build.sh
+          elif [ -f build.sh ]; then
+            chmod +x build.sh
+            ./build.sh
+          else
+            echo "No standard build script found."
+            echo "BUILD BLOCKED — inspect repository build instructions."
+            exit 1
+          fi
+
+      - name: Build result
+        run: |
+          echo "=== BUILD COMPLETED ==="
+          git rev-parse --short HEAD
+          git status --short
