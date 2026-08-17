@@ -65,95 +65,66 @@ jobs:
           echo "=== SCRIPTS DIRECTORY ==="
           ls -la scripts 2>/dev/null || echo "scripts: NOT FOUND"
 
-      - name: Inspect build scripts
-        run: |
-          echo "=== BUILD SCRIPTS ==="
-          find scripts -maxdepth 2 -type f | sort 2>/dev/null || echo "No scripts directory found"
-
           echo ""
-          echo "=== PACKAGE SCRIPTS ==="
-          if [ -f package.json ]; then
-            echo "package.json exists at root:"
-            grep -A30 '"scripts"' package.json || true
-          else
-            echo "package.json NOT FOUND at root"
-          fi
-
-          echo ""
-          echo "=== APP DIRECTORIES ==="
+          echo "=== APP DIRECTORY STRUCTURE ==="
           if [ -d app ]; then
             echo "app directory found. Contents:"
             ls -la app
+            if [ -d app/client ]; then
+              echo "app/client found. Contents:"
+              ls -la app/client | head -20
+            fi
+            if [ -d app/server ]; then
+              echo "app/server found. Contents:"
+              ls -la app/server | head -20
+            fi
           else
             echo "app directory NOT FOUND"
           fi
 
-      - name: Determine build method
-        id: build_method
-        run: |
-          echo "=== DETERMINING BUILD METHOD ==="
-
-          if [ -f scripts/build.sh ]; then
-            echo "Method: scripts/build.sh"
-            echo "build_method=script" >> $GITHUB_OUTPUT
-          elif [ -f build.sh ]; then
-            echo "Method: build.sh"
-            echo "build_method=script" >> $GITHUB_OUTPUT
-          elif [ -f docker-compose.yml ]; then
-            echo "Method: docker-compose"
-            echo "build_method=docker_compose" >> $GITHUB_OUTPUT
-          elif [ -f Dockerfile ]; then
-            echo "Method: docker build"
-            echo "build_method=docker" >> $GITHUB_OUTPUT
-          elif [ -f package.json ] && [ -f pom.xml ]; then
-            echo "Method: npm + maven (no script)"
-            echo "build_method=manual" >> $GITHUB_OUTPUT
-          else
-            echo "BUILD BLOCKED — no build method identified"
-            echo "build_method=unknown" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-      - name: Build with determined method
-        if: steps.build_method.outputs.build_method != 'unknown'
+      - name: Build frontend and RTS first
         run: |
           set -e
-          echo "=== STARTING VYENFITA BUILD ==="
+          echo "=== BUILDING FRONTEND AND RTS ==="
 
-          if [ "${{ steps.build_method.outputs.build_method }}" == "script" ]; then
-            if [ -f scripts/build.sh ]; then
-              chmod +x scripts/build.sh
-              ./scripts/build.sh
-            elif [ -f build.sh ]; then
-              chmod +x build.sh
-              ./build.sh
-            fi
-          elif [ "${{ steps.build_method.outputs.build_method }}" == "docker_compose" ]; then
-            docker-compose build
-          elif [ "${{ steps.build_method.outputs.build_method }}" == "docker" ]; then
-            echo "=== DOCKER BUILD WITH REQUIRED ARGS ==="
-            echo "Building with BASE=ubuntu:22.04 as default..."
-            docker build \
-              --build-arg BASE=ubuntu:22.04 \
-              --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
-              -t vyenfita:latest .
-          elif [ "${{ steps.build_method.outputs.build_method }}" == "manual" ]; then
-            echo "=== MANUAL BUILD: npm install + mvn ==="
-            echo "Installing frontend dependencies..."
-            npm install
-            echo "Building backend..."
-            cd appsmith-server && mvn clean install -DskipTests
-            cd ..
-            echo "Building frontend..."
-            cd appsmith-client && npm install && npm run build
-            cd ..
-          else
-            echo "ERROR: Unhandled build method"
-            exit 1
-          fi
+          echo "Installing frontend dependencies..."
+          cd app/client
+          npm ci || npm install
+          cd ../..
+
+          echo "Building frontend..."
+          cd app/client
+          npm run build
+          cd ../..
+
+          echo "Building RTS..."
+          cd app/client/packages/rts
+          npm ci || npm install
+          npm run build
+          cd ../../../..
+
+          echo "=== FRONTEND AND RTS BUILD COMPLETED ==="
+          echo "Checking build artifacts:"
+          ls -la app/client/build 2>/dev/null || echo "app/client/build NOT FOUND - FAILED"
+          ls -la app/client/packages/rts/dist 2>/dev/null || echo "app/client/packages/rts/dist NOT FOUND - FAILED"
+
+      - name: Build Docker image
+        run: |
+          set -e
+          echo "=== BUILDING DOCKER IMAGE ==="
+          docker build \
+            --build-arg BASE=ubuntu:22.04 \
+            --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
+            -t vyenfita:latest .
+
+      - name: Verify Docker image
+        run: |
+          echo "=== VERIFYING DOCKER IMAGE ==="
+          docker images | grep vyenfita
+          docker history vyenfita:latest
 
       - name: Build result
         run: |
-          echo "=== BUILD COMPLETED ==="
+          echo "=== BUILD COMPLETED SUCCESSFULLY ==="
           git rev-parse --short HEAD
-          git status --short
+          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep vyenfita || echo "Image not found"
