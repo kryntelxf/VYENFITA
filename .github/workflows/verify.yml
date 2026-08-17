@@ -1,0 +1,23 @@
+name: VYENFITA Verify
+
+on:
+  push:
+    branches:
+      - vyenfita-development
+  pull_request:
+    branches:
+      - vyenfita-development
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify repository
+        run: |
+          echo "VYENFITA repository verification"
+          git rev-parse --short HEAD
+          git status --short
