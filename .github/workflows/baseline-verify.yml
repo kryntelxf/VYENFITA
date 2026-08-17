@@ -1,0 +1,51 @@
+name: VYENFITA Baseline Verify
+
+on:
+  push:
+    branches:
+      - vyenfita-development
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout VYENFITA
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Repository verification
+        run: |
+          echo "=== VYENFITA BASELINE VERIFICATION ==="
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo "Branch:"
+          git branch --show-current
+
+          echo "Status:"
+          git status --short
+
+          echo "Remotes:"
+          git remote -v
+
+      - name: Environment verification
+        run: |
+          echo "=== ENVIRONMENT ==="
+          node --version
+          npm --version
+          java -version
+          git --version
+          docker --version
+
+      - name: Repository structure
+        run: |
+          echo "=== ROOT FILES ==="
+          ls -la
+
+          echo "=== BUILD FILES ==="
+          test -f package.json && echo "package.json: FOUND"
+          test -f Dockerfile && echo "Dockerfile: FOUND"
+          test -f pom.xml && echo "pom.xml: FOUND"
