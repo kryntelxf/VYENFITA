@@ -1,0 +1,72 @@
+name: VYENFITA Docker Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+
+jobs:
+  docker:
+    name: Build & Run VYENFITA Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          echo "=== BUILDING DOCKER IMAGE ==="
+          docker build \
+            --build-arg BASE=ubuntu:22.04 \
+            --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
+            -t vyenfita:latest .
+          
+          echo "✅ Docker image built successfully"
+          docker images | grep vyenfita
+
+      - name: Run container
+        run: |
+          echo "=== RUNNING CONTAINER ==="
+          docker run -d \
+            --name vyenfita \
+            -p 8080:8080 \
+            -e APPSMITH_DB_URL="mongodb://host.docker.internal:27017/appsmith" \
+            -e APPSMITH_REDIS_URI="redis://host.docker.internal:6379" \
+            vyenfita:latest
+          
+          echo "✅ Container started"
+          docker ps | grep vyenfita
+
+      - name: Wait for server ready
+        run: |
+          echo "=== WAITING FOR SERVER ==="
+          for i in {1..30}; do
+            if curl -s -f http://localhost:8080/api/v1/health > /dev/null 2>&1; then
+              echo "✅ Server is ready!"
+              exit 0
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+          echo "❌ Server did not become ready in time"
+          exit 1
+
+      - name: Show container logs (if failed)
+        if: failure()
+        run: |
+          echo "=== CONTAINER LOGS ==="
+          docker logs vyenfita --tail 100
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop vyenfita || true
+          docker rm vyenfita || true
