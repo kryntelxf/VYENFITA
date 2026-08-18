@@ -1,133 +1,149 @@
-import { OpenAI } from 'openai';
-import {
-  AIProvider,
-  ChatCompletionParams,
-  ChatCompletionResponse,
-  TextCompletionParams,
-  TextCompletionResponse,
-  EmbeddingParams,
-  EmbeddingResponse,
-  ProviderConfig,
-} from '../interfaces/ai-provider.interface';
+/**
+ * VYENFITA AI Provider Interface
+ * Defines the contract for all AI providers
+ */
+export interface AIProvider {
+  /**
+   * Provider name
+   */
+  readonly name: string;
+
+  /**
+   * Generate a chat completion
+   */
+  generateChatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResponse>;
+
+  /**
+   * Generate a text completion
+   */
+  generateTextCompletion(params: TextCompletionParams): Promise<TextCompletionResponse>;
+
+  /**
+   * Generate embeddings
+   */
+  generateEmbeddings(params: EmbeddingParams): Promise<EmbeddingResponse>;
+
+  /**
+   * Check if provider is healthy
+   */
+  healthCheck(): Promise<boolean>;
+
+  /**
+   * Get provider configuration
+   */
+  getConfig(): ProviderConfig;
+}
 
 /**
- * OpenAI Provider Implementation
- * Implements the AIProvider interface for OpenAI API
+ * Chat completion parameters
  */
-export class OpenAIProvider implements AIProvider {
-  readonly name = 'openai';
-  private client: OpenAI;
-  private config: ProviderConfig;
+export interface ChatCompletionParams {
+  messages: ChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
+  stopSequences?: string[];
+  model?: string;
+}
 
-  constructor(config: ProviderConfig) {
-    this.config = config;
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: config.baseURL,
-      timeout: config.timeout || 60000,
-    });
-  }
+/**
+ * Chat message structure
+ */
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'function';
+  content: string;
+  name?: string;
+  function_call?: FunctionCall;
+}
 
-  async generateChatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
-    try {
-      const response = await this.client.chat.completions.create({
-        model: params.model || this.config.model,
-        messages: params.messages,
-        temperature: params.temperature || this.config.temperature,
-        max_tokens: params.maxTokens || this.config.maxTokens,
-        stream: params.stream || false,
-        stop: params.stopSequences,
-      });
+/**
+ * Function call structure
+ */
+export interface FunctionCall {
+  name: string;
+  arguments: string;
+}
 
-      return {
-        id: response.id,
-        choices: response.choices.map((choice) => ({
-          index: choice.index,
-          message: {
-            role: choice.message.role as 'system' | 'user' | 'assistant' | 'function',
-            content: choice.message.content || '',
-            function_call: choice.message.function_call || undefined,
-          },
-          finishReason: choice.finish_reason || 'stop',
-        })),
-        usage: {
-          promptTokens: response.usage?.prompt_tokens || 0,
-          completionTokens: response.usage?.completion_tokens || 0,
-          totalTokens: response.usage?.total_tokens || 0,
-        },
-        created: response.created,
-        model: response.model,
-      };
-    } catch (error) {
-      throw new Error(`OpenAI provider error: ${this.getErrorMessage(error)}`);
-    }
-  }
+/**
+ * Chat completion response
+ */
+export interface ChatCompletionResponse {
+  id: string;
+  choices: Choice[];
+  usage: Usage;
+  created: number;
+  model: string;
+}
 
-  async generateTextCompletion(params: TextCompletionParams): Promise<TextCompletionResponse> {
-    try {
-      const response = await this.client.completions.create({
-        model: this.config.model,
-        prompt: params.prompt,
-        max_tokens: params.maxTokens || this.config.maxTokens,
-        temperature: params.temperature || this.config.temperature,
-        stop: params.stopSequences,
-      });
+/**
+ * Choice structure
+ */
+export interface Choice {
+  index: number;
+  message: ChatMessage;
+  finishReason: string;
+}
 
-      return {
-        id: response.id,
-        text: response.choices[0]?.text || '',
-        usage: {
-          promptTokens: response.usage?.prompt_tokens || 0,
-          completionTokens: response.usage?.completion_tokens || 0,
-          totalTokens: response.usage?.total_tokens || 0,
-        },
-      };
-    } catch (error) {
-      throw new Error(`OpenAI provider error: ${this.getErrorMessage(error)}`);
-    }
-  }
+/**
+ * Usage information
+ */
+export interface Usage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
 
-  async generateEmbeddings(params: EmbeddingParams): Promise<EmbeddingResponse> {
-    try {
-      const response = await this.client.embeddings.create({
-        model: params.model || 'text-embedding-3-small',
-        input: params.input,
-      });
+/**
+ * Text completion parameters
+ */
+export interface TextCompletionParams {
+  prompt: string;
+  maxTokens?: number;
+  temperature?: number;
+  stopSequences?: string[];
+}
 
-      return {
-        data: response.data.map((item) => ({
-          embedding: item.embedding,
-          index: item.index,
-        })),
-        usage: {
-          promptTokens: response.usage?.prompt_tokens || 0,
-          completionTokens: 0,
-          totalTokens: response.usage?.total_tokens || 0,
-        },
-      };
-    } catch (error) {
-      throw new Error(`OpenAI provider error: ${this.getErrorMessage(error)}`);
-    }
-  }
+/**
+ * Text completion response
+ */
+export interface TextCompletionResponse {
+  id: string;
+  text: string;
+  usage: Usage;
+}
 
-  async healthCheck(): Promise<boolean> {
-    try {
-      // Simple health check - try to list models
-      await this.client.models.list();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+/**
+ * Embedding parameters
+ */
+export interface EmbeddingParams {
+  input: string | string[];
+  model?: string;
+}
 
-  getConfig(): ProviderConfig {
-    return this.config;
-  }
+/**
+ * Embedding response
+ */
+export interface EmbeddingResponse {
+  data: EmbeddingData[];
+  usage: Usage;
+}
 
-  private getErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
-  }
-          }
+/**
+ * Embedding data
+ */
+export interface EmbeddingData {
+  embedding: number[];
+  index: number;
+}
+
+/**
+ * Provider configuration
+ */
+export interface ProviderConfig {
+  apiKey?: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+  baseURL?: string;
+  timeout?: number;
+}
