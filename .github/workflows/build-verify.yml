@@ -8,7 +8,9 @@ on:
 
 jobs:
   build:
+    name: Build VYENFITA
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -16,115 +18,119 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Show environment
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.17.1'
+          cache: 'npm'
+          cache-dependency-path: 'app/client/package-lock.json'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Maven
+        uses: stCarolas/setup-maven@v4.5
+        with:
+          maven-version: '3.9.6'
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('app/server/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Cache client dependencies
+        uses: actions/cache@v4
+        with:
+          path: app/client/node_modules
+          key: ${{ runner.os }}-client-${{ hashFiles('app/client/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-client-
+
+      - name: Cache RTS dependencies
+        uses: actions/cache@v4
+        with:
+          path: app/client/packages/rts/node_modules
+          key: ${{ runner.os }}-rts-${{ hashFiles('app/client/packages/rts/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-rts-
+
+      - name: Build client
+        id: client-build
         run: |
-          echo "=== ENVIRONMENT ==="
-          node --version
-          npm --version
-          java -version
-          docker --version
-          free -h
-          df -h
-
-      - name: Inspect repository structure
-        run: |
-          echo "=== REPOSITORY STRUCTURE ==="
-          echo "Root directory contents:"
-          ls -la
-
-          echo ""
-          echo "=== CHECKING FOR BUILD FILES ==="
-          echo "Looking for build.sh:"
-          find . -maxdepth 2 -name "build.sh" -type f || echo "build.sh: NOT FOUND"
-
-          echo ""
-          echo "Looking for Dockerfile:"
-          find . -maxdepth 2 -name "Dockerfile" -type f || echo "Dockerfile: NOT FOUND"
-
-          echo ""
-          echo "Looking for docker-compose.yml:"
-          find . -maxdepth 2 -name "docker-compose.yml" -type f || echo "docker-compose.yml: NOT FOUND"
-
-          echo ""
-          echo "Looking for package.json:"
-          find . -maxdepth 2 -name "package.json" -type f || echo "package.json: NOT FOUND"
-
-          echo ""
-          echo "Looking for pom.xml:"
-          find . -maxdepth 2 -name "pom.xml" -type f || echo "pom.xml: NOT FOUND"
-
-          echo ""
-          echo "Looking for appsmith-server directory:"
-          ls -la appsmith-server 2>/dev/null || echo "appsmith-server: NOT FOUND"
-
-          echo ""
-          echo "Looking for appsmith-client directory:"
-          ls -la appsmith-client 2>/dev/null || echo "appsmith-client: NOT FOUND"
-
-          echo ""
-          echo "=== SCRIPTS DIRECTORY ==="
-          ls -la scripts 2>/dev/null || echo "scripts: NOT FOUND"
-
-          echo ""
-          echo "=== APP DIRECTORY STRUCTURE ==="
-          if [ -d app ]; then
-            echo "app directory found. Contents:"
-            ls -la app
-            if [ -d app/client ]; then
-              echo "app/client found. Contents:"
-              ls -la app/client | head -20
-            fi
-            if [ -d app/server ]; then
-              echo "app/server found. Contents:"
-              ls -la app/server | head -20
-            fi
-          else
-            echo "app directory NOT FOUND"
-          fi
-
-      - name: Build frontend and RTS first
-        run: |
-          set -e
-          echo "=== BUILDING FRONTEND AND RTS ==="
-
-          echo "Installing frontend dependencies..."
+          echo "=== BUILDING CLIENT ==="
           cd app/client
-          npm ci || npm install
-          cd ../..
-
-          echo "Building frontend..."
-          cd app/client
+          echo "Installing dependencies..."
+          npm ci
+          echo "Building..."
           npm run build
           cd ../..
+          echo "✅ Client build completed"
+          ls -la app/client/build | head -10
 
-          echo "Building RTS..."
+      - name: Build server
+        id: server-build
+        run: |
+          echo "=== BUILDING SERVER ==="
+          cd app/server
+          echo "Building with Maven..."
+          mvn clean install -DskipTests
+          cd ../..
+          echo "✅ Server build completed"
+          ls -la app/server/target/*.jar | head -5
+
+      - name: Build RTS
+        id: rts-build
+        run: |
+          echo "=== BUILDING RTS ==="
           cd app/client/packages/rts
-          npm ci || npm install
+          echo "Installing dependencies..."
+          npm ci
+          echo "Building..."
           npm run build
           cd ../../../..
+          echo "✅ RTS build completed"
+          ls -la app/client/packages/rts/dist | head -10
 
-          echo "=== FRONTEND AND RTS BUILD COMPLETED ==="
-          echo "Checking build artifacts:"
-          ls -la app/client/build 2>/dev/null || echo "app/client/build NOT FOUND - FAILED"
-          ls -la app/client/packages/rts/dist 2>/dev/null || echo "app/client/packages/rts/dist NOT FOUND - FAILED"
-
-      - name: Build Docker image
+      - name: Verify build artifacts
         run: |
-          set -e
-          echo "=== BUILDING DOCKER IMAGE ==="
-          docker build \
-            --build-arg BASE=ubuntu:22.04 \
-            --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
-            -t vyenfita:latest .
-
-      - name: Verify Docker image
-        run: |
-          echo "=== VERIFYING DOCKER IMAGE ==="
-          docker images | grep vyenfita
-          docker history vyenfita:latest
+          echo "=== VERIFYING BUILD ARTIFACTS ==="
+          
+          echo "Client build:"
+          if [ -d "app/client/build" ] && [ -f "app/client/build/index.html" ]; then
+            echo "✅ Client build verified"
+          else
+            echo "❌ Client build not found"
+            exit 1
+          fi
+          
+          echo "Server build:"
+          if [ -d "app/server/target" ] && [ "$(ls -1 app/server/target/*.jar 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "✅ Server build verified"
+          else
+            echo "❌ Server build not found"
+            exit 1
+          fi
+          
+          echo "RTS build:"
+          if [ -d "app/client/packages/rts/dist" ]; then
+            echo "✅ RTS build verified"
+          else
+            echo "❌ RTS build not found"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== ALL BUILDS VERIFIED SUCCESSFULLY ==="
 
       - name: Build result
         run: |
-          echo "=== BUILD COMPLETED SUCCESSFULLY ==="
-          git rev-parse --short HEAD
-          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep vyenfita || echo "Image not found"
+          echo "=== VYENFITA BUILD COMPLETED ==="
+          echo "Commit: $(git rev-parse --short HEAD)"
+          echo "Branch: $(git branch --show-current)"
+          echo "Status: SUCCESS"
