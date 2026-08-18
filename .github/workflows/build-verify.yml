@@ -22,6 +22,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18.17.1'
+          cache: 'npm'
+          cache-dependency-path: 'app/client/package-lock.json'
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -63,8 +65,10 @@ jobs:
         run: |
           echo "=== BUILDING CLIENT ==="
           cd app/client
-          echo "Installing dependencies..."
-          npm ci || npm install
+          echo "Installing dependencies with --legacy-peer-deps..."
+          echo "NOTE: This is temporary. react-custom-scrollbars@4.2.1 requires React 16 but project uses React 17."
+          echo "This will be addressed in Phase 2 (dependency upgrades)."
+          npm ci --legacy-peer-deps
           echo "Building..."
           npm run build
           cd ../..
@@ -88,7 +92,7 @@ jobs:
           echo "=== BUILDING RTS ==="
           cd app/client/packages/rts
           echo "Installing dependencies..."
-          npm ci || npm install
+          npm ci
           echo "Building..."
           npm run build
           cd ../../../..
@@ -132,3 +136,21 @@ jobs:
           echo "Commit: $(git rev-parse --short HEAD)"
           echo "Branch: $(git branch --show-current)"
           echo "Status: SUCCESS"
+          
+      - name: ⚠️ Technical Debt Report
+        run: |
+          echo "=== TECHNICAL DEBT REPORT ==="
+          echo ""
+          echo "1. react-custom-scrollbars@4.2.1"
+          echo "   - Issue: Requires React 16, but project uses React 17"
+          echo "   - Resolution: Using --legacy-peer-deps (temporary)"
+          echo "   - Fix: Upgrade to react-custom-scrollbars@4.2.2 or newer, or migrate to another library"
+          echo "   - Priority: MEDIUM"
+          echo ""
+          echo "2. Dockerfile ARG BASE"
+          echo "   - Issue: No default value for ARG BASE"
+          echo "   - Resolution: Passed via --build-arg in workflow"
+          echo "   - Fix: Add default value in Dockerfile (ARG BASE=ubuntu:22.04)"
+          echo "   - Priority: LOW"
+          echo ""
+          echo "=== END OF TECHNICAL DEBT REPORT ==="
