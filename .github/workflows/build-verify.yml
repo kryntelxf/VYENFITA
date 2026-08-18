@@ -21,91 +21,105 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18.17.1'
+          node-version: '24.14.1'
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       - name: Setup Maven
         uses: stCarolas/setup-maven@v4.5
         with:
-          maven-version: '3.9.6'
+          maven-version: '3.9.12'
 
-      - name: Build with Appsmith script
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('app/server/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Cache client dependencies
+        uses: actions/cache@v4
+        with:
+          path: app/client/node_modules
+          key: ${{ runner.os }}-client-${{ hashFiles('app/client/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-client-
+
+      - name: Build server
         run: |
-          echo "=== VYENFITA BUILD ==="
-          echo "Node: $(node --version)"
-          echo "npm: $(npm --version)"
+          echo "=== BUILDING SERVER ==="
           echo "Java: $(java -version 2>&1 | head -1)"
           echo "Maven: $(mvn --version | head -1)"
+          cd app/server
+          mvn clean compile
+          ./build.sh -DskipTests
+          cd ../..
+          echo "✅ Server build completed"
+          ls -la app/server/dist/*.jar | head -5
+
+      - name: Build RTS
+        run: |
+          echo "=== BUILDING RTS ==="
+          echo "Node: $(node --version)"
+          echo "Yarn: $(yarn --version 2>/dev/null || echo 'yarn not found, installing...' && npm install -g yarn)"
+          cd app/client/packages/rts
+          yarn install
+          yarn run build
+          cd ../../../..
+          echo "✅ RTS build completed"
+
+      - name: Build client
+        run: |
+          echo "=== BUILDING CLIENT ==="
+          cd app/client
+          echo "Installing dependencies with yarn..."
+          yarn install
+          echo "Building..."
+          yarn run build
+          cd ../..
+          echo "✅ Client build completed"
+          ls -la app/client/build | head -10
+
+      - name: Verify build artifacts
+        run: |
+          echo "=== VERIFYING BUILD ARTIFACTS ==="
           
-          echo ""
-          echo "=== USING APPSMITH BUILD SCRIPT ==="
-          
-          # Cari script build yang tersedia
-          if [ -f "scripts/build.sh" ]; then
-            echo "Found scripts/build.sh"
-            chmod +x scripts/build.sh
-            ./scripts/build.sh
-          elif [ -f "build.sh" ]; then
-            echo "Found build.sh"
-            chmod +x build.sh
-            ./build.sh
-          elif [ -f "app/client/package.json" ] && [ -f "app/server/pom.xml" ]; then
-            echo "No build script found. Building manually..."
-            
-            # Build backend
-            echo "=== Building server ==="
-            cd app/server
-            mvn clean install -DskipTests
-            cd ../..
-            
-            # Build frontend with npm 7+ workspace support
-            echo "=== Building client ==="
-            cd app/client
-            npm install --legacy-peer-deps --workspaces=false
-            npm run build
-            cd ../..
-            
-            # Build RTS
-            echo "=== Building RTS ==="
-            cd app/client/packages/rts
-            npm install --legacy-peer-deps
-            npm run build
-            cd ../../../..
+          echo "Client build:"
+          if [ -d "app/client/build" ] && [ -f "app/client/build/index.html" ]; then
+            echo "✅ Client build verified"
           else
-            echo "❌ No build method found"
+            echo "❌ Client build not found at app/client/build"
+            find . -name "build" -type d 2>/dev/null | head -5
             exit 1
           fi
-
-      - name: Verify build
-        run: |
-          echo "=== VERIFYING BUILD ==="
           
-          # Cek client build
-          if [ -d "app/client/build" ] && [ -f "app/client/build/index.html" ]; then
-            echo "✅ Client build OK"
+          echo "Server build:"
+          if [ -d "app/server/dist" ] && [ "$(ls -1 app/server/dist/*.jar 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "✅ Server build verified"
           else
-            echo "⚠️ Client build not found at app/client/build"
-            find . -name "build" -type d 2>/dev/null | head -5
+            echo "❌ Server build not found"
+            exit 1
           fi
           
-          # Cek server build
-          if [ -d "app/server/target" ] && [ "$(ls -1 app/server/target/*.jar 2>/dev/null | wc -l)" -gt 0 ]; then
-            echo "✅ Server build OK"
-          else
-            echo "⚠️ Server build not found"
-          fi
-          
-          # Cek RTS build
+          echo "RTS build:"
           if [ -d "app/client/packages/rts/dist" ]; then
-            echo "✅ RTS build OK"
+            echo "✅ RTS build verified"
           else
-            echo "⚠️ RTS build not found"
+            echo "❌ RTS build not found"
+            exit 1
           fi
           
           echo ""
-          echo "=== BUILD COMPLETE ==="
+          echo "=== ALL BUILDS VERIFIED SUCCESSFULLY ==="
+
+      - name: Build result
+        run: |
+          echo "=== VYENFITA BUILD COMPLETED ==="
+          echo "Commit: $(git rev-parse --short HEAD)"
+          echo "Branch: $(git branch --show-current)"
+          echo "Status: SUCCESS"
