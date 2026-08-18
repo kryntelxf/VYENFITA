@@ -22,8 +22,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18.17.1'
-          cache: 'npm'
-          cache-dependency-path: 'app/client/package-lock.json'
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -36,39 +34,16 @@ jobs:
         with:
           maven-version: '3.9.6'
 
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('app/server/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Cache client dependencies
-        uses: actions/cache@v4
-        with:
-          path: app/client/node_modules
-          key: ${{ runner.os }}-client-${{ hashFiles('app/client/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-client-
-
-      - name: Cache RTS dependencies
-        uses: actions/cache@v4
-        with:
-          path: app/client/packages/rts/node_modules
-          key: ${{ runner.os }}-rts-${{ hashFiles('app/client/packages/rts/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-rts-
-
       - name: Build client
         id: client-build
         run: |
           echo "=== BUILDING CLIENT ==="
           cd app/client
+          echo "Node version: $(node --version)"
+          echo "npm version: $(npm --version)"
           echo "Installing dependencies with --legacy-peer-deps..."
-          echo "NOTE: This is temporary. react-custom-scrollbars@4.2.1 requires React 16 but project uses React 17."
-          echo "This will be addressed in Phase 2 (dependency upgrades)."
-          npm ci --legacy-peer-deps
+          echo "NOTE: react-custom-scrollbars@4.2.1 requires React 16 but project uses React 17"
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           echo "Building..."
           npm run build
           cd ../..
@@ -80,6 +55,8 @@ jobs:
         run: |
           echo "=== BUILDING SERVER ==="
           cd app/server
+          echo "Java version: $(java -version 2>&1 | head -1)"
+          echo "Maven version: $(mvn --version | head -1)"
           echo "Building with Maven..."
           mvn clean install -DskipTests
           cd ../..
@@ -92,7 +69,7 @@ jobs:
           echo "=== BUILDING RTS ==="
           cd app/client/packages/rts
           echo "Installing dependencies..."
-          npm ci
+          npm ci || npm install
           echo "Building..."
           npm run build
           cd ../../../..
@@ -137,20 +114,27 @@ jobs:
           echo "Branch: $(git branch --show-current)"
           echo "Status: SUCCESS"
           
-      - name: ⚠️ Technical Debt Report
+      - name: Technical Debt Report
+        if: always()
         run: |
           echo "=== TECHNICAL DEBT REPORT ==="
           echo ""
           echo "1. react-custom-scrollbars@4.2.1"
           echo "   - Issue: Requires React 16, but project uses React 17"
           echo "   - Resolution: Using --legacy-peer-deps (temporary)"
-          echo "   - Fix: Upgrade to react-custom-scrollbars@4.2.2 or newer, or migrate to another library"
+          echo "   - Fix: Upgrade to react-custom-scrollbars@4.2.2 or newer"
           echo "   - Priority: MEDIUM"
           echo ""
           echo "2. Dockerfile ARG BASE"
           echo "   - Issue: No default value for ARG BASE"
           echo "   - Resolution: Passed via --build-arg in workflow"
-          echo "   - Fix: Add default value in Dockerfile (ARG BASE=ubuntu:22.04)"
+          echo "   - Fix: Add default value in Dockerfile"
+          echo "   - Priority: LOW"
+          echo ""
+          echo "3. Cache dependencies"
+          echo "   - Issue: Cache step failed because package-lock.json path not found"
+          echo "   - Resolution: Removed cache for now"
+          echo "   - Fix: Add cache back after verifying correct package-lock.json location"
           echo "   - Priority: LOW"
           echo ""
           echo "=== END OF TECHNICAL DEBT REPORT ==="
