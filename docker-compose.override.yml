@@ -1,0 +1,109 @@
+# ============================================================
+# VYENFITA Docker Compose Override
+# ============================================================
+# This file extends the base Appsmith docker-compose.yml
+# to add VYENFITA AI Service and integrate it with Appsmith.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
+#
+# Environment variables:
+#   - OPENAI_API_KEY: Your OpenAI API key
+#   - ANTHROPIC_API_KEY: Your Anthropic API key (optional)
+#   - AI_API_KEYS: Comma-separated API keys for AI Service
+#   - AI_PROVIDER: Default provider (openai|anthropic)
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================
+  # VYENFITA AI SERVICE
+  # ==========================================================
+  vyenfita-ai:
+    image: vyenfita-ai:latest
+    build:
+      context: ./app/ai
+      dockerfile: Dockerfile
+      args:
+        NODE_VERSION: 24.14.1
+    container_name: vyenfita-ai
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+      - "9090:9090"
+    environment:
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - AI_SERVICE_PORT=3001
+      - AI_SERVICE_HOST=0.0.0.0
+      - AI_LOG_LEVEL=${AI_LOG_LEVEL:-info}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-4096}
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.7}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-opus-20240229}
+      - ANTHROPIC_MAX_TOKENS=${ANTHROPIC_MAX_TOKENS:-4096}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_API_KEYS=${AI_API_KEYS:-vyenfita-default-key}
+      - AI_RATE_LIMIT_ENABLED=${AI_RATE_LIMIT_ENABLED:-true}
+      - AI_RATE_LIMIT_MAX_REQUESTS=${AI_RATE_LIMIT_MAX_REQUESTS:-100}
+      - AI_ENABLE_CACHING=${AI_ENABLE_CACHING:-true}
+      - AI_CACHE_TTL=${AI_CACHE_TTL:-3600}
+      - AI_ENABLE_APPLICATION_GENERATION=${AI_ENABLE_APPLICATION_GENERATION:-true}
+      - AI_ENABLE_WORKFLOW_GENERATION=${AI_ENABLE_WORKFLOW_GENERATION:-true}
+      - AI_ENABLE_AUTOMATION=${AI_ENABLE_AUTOMATION:-true}
+      - AI_MAX_CONCURRENT_REQUESTS=${AI_MAX_CONCURRENT_REQUESTS:-10}
+      - AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-30000}
+      - AI_ENABLE_METRICS=${AI_ENABLE_METRICS:-true}
+      - AI_METRICS_PORT=${AI_METRICS_PORT:-9090}
+      - APPSMITH_API_URL=http://appsmith:8080/api/v1
+      - AI_ENABLE_AUDIT_LOGS=${AI_ENABLE_AUDIT_LOGS:-true}
+      - AI_LOG_FILE_PATH=/app/logs/ai-service.log
+    volumes:
+      - ./app/ai/logs:/app/logs
+    networks:
+      - appsmith
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}) || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - appsmith
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================
+  # APPSMITH WITH AI INTEGRATION
+  # ==========================================================
+  appsmith:
+    environment:
+      - APPSMITH_AI_ENABLED=${APPSMITH_AI_ENABLED:-true}
+      - APPSMITH_AI_SERVICE_URL=http://vyenfita-ai:3001
+      - APPSMITH_AI_API_KEY=${AI_API_KEYS:-vyenfita-default-key}
+      - APPSMITH_AI_TIMEOUT=${APPSMITH_AI_TIMEOUT:-30000}
+      - APPSMITH_AI_DEFAULT_PROVIDER=${AI_PROVIDER:-openai}
+      - APPSMITH_FEATURE_AI_APPLICATION_GENERATION=${APPSMITH_FEATURE_AI_APPLICATION_GENERATION:-true}
+      - APPSMITH_FEATURE_AI_WORKFLOW_GENERATION=${APPSMITH_FEATURE_AI_WORKFLOW_GENERATION:-true}
+      - APPSMITH_AI_HEALTH_CHECK_INTERVAL=${APPSMITH_AI_HEALTH_CHECK_INTERVAL:-60}
+      - APPSMITH_AI_RETRY_ATTEMPTS=${APPSMITH_AI_RETRY_ATTEMPTS:-3}
+      - APPSMITH_AI_RETRY_BACKOFF_MS=${APPSMITH_AI_RETRY_BACKOFF_MS:-1000}
+    depends_on:
+      vyenfita-ai:
+        condition: service_healthy
+    networks:
+      - appsmith
+
+networks:
+  appsmith:
+    name: appsmith
+    driver: bridge
+
+volumes:
+  # Optional volumes can be added here
