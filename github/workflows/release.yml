@@ -1,0 +1,132 @@
+name: VYENFITA Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Build & Release VYENFITA
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION: $VERSION"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Setup Maven
+        uses: stCarolas/setup-maven@v4.5
+        with:
+          maven-version: '3.9.12'
+
+      - name: Build VYENFITA
+        run: |
+          echo "=== BUILDING VYENFITA ${{ steps.get_version.outputs.version }} ==="
+          
+          # Build Backend
+          cd app/server
+          mvn clean install -DskipTests
+          cd ../..
+          
+          # Build Frontend
+          cd app/client
+          yarn install --frozen-lockfile
+          yarn run build
+          cd ../..
+          
+          # Build RTS
+          cd app/client/packages/rts
+          yarn install --frozen-lockfile
+          yarn run build
+          cd ../../../..
+          
+          # Build AI Layer
+          cd app/ai
+          yarn install --frozen-lockfile
+          yarn run build
+          cd ../..
+
+      - name: Build Docker images
+        run: |
+          echo "=== BUILDING DOCKER IMAGES ==="
+          
+          # Build main Appsmith image with VYENFITA
+          docker build \
+            --build-arg BASE=ubuntu:22.04 \
+            --build-arg APPSMITH_CLOUD_SERVICES_BASE_URL=http://localhost:8080 \
+            -t vyenfita:latest .
+          
+          # Build AI image
+          cd app/ai
+          docker build -t vyenfita-ai:latest .
+          cd ../..
+
+      - name: Create Release Artifacts
+        run: |
+          echo "=== CREATING RELEASE ARTIFACTS ==="
+          
+          # Save Docker images
+          docker save vyenfita:latest -o vyenfita-${{ steps.get_version.outputs.version }}.tar
+          docker save vyenfita-ai:latest -o vyenfita-ai-${{ steps.get_version.outputs.version }}.tar
+          
+          # Create source archive
+          git archive --format=tar.gz --output=vyenfita-source-${{ steps.get_version.outputs.version }}.tar.gz HEAD
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: VYENFITA ${{ steps.get_version.outputs.version }}
+          body: |
+            ## VYENFITA ${{ steps.get_version.outputs.version }}
+            
+            ### AI-Native Business Application & Automation Platform
+            
+            ### Features
+            - ✅ AI-Powered Application Generation
+            - ✅ AI-Powered Workflow Generation
+            - ✅ Multi-Provider AI Support (OpenAI, Anthropic)
+            - ✅ Business Intelligence & Analytics
+            - ✅ Enterprise Security & Compliance
+            - ✅ Docker Containerization
+            
+            ### Installation
+            ```bash
+            docker load -i vyenfita-${{ steps.get_version.outputs.version }}.tar
+            docker load -i vyenfita-ai-${{ steps.get_version.outputs.version }}.tar
+            docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
+            ```
+            
+            ### Documentation
+            - [VYENFITA Docs](https://github.com/kryntelxf/VYENFITA)
+            
+            ### Contributing
+            - Fork the repository
+            - Create a feature branch
+            - Submit a Pull Request
+          draft: false
+          prerelease: true
+          files: |
+            vyenfita-${{ steps.get_version.outputs.version }}.tar
+            vyenfita-ai-${{ steps.get_version.outputs.version }}.tar
+            vyenfita-source-${{ steps.get_version.outputs.version }}.tar.gz
