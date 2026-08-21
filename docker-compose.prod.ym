@@ -1,0 +1,356 @@
+# ============================================================
+# VYENFITA PRODUCTION DOCKER COMPOSE
+# ============================================================
+# This file extends the base and override compose files
+# for production deployment with enterprise features.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.prod.yml up -d
+#
+# Environment variables:
+#   - .env.production file should be present in the root directory
+# ============================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================
+  # VYENFITA AI SERVICE - PRODUCTION
+  # ==========================================================
+  vyenfita-ai:
+    image: vyenfita-ai:latest
+    container_name: vyenfita-ai-prod
+    restart: always
+    environment:
+      # Node.js
+      - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=8192
+      
+      # Service Configuration
+      - AI_SERVICE_PORT=3001
+      - AI_SERVICE_HOST=0.0.0.0
+      - AI_LOG_LEVEL=warn
+      
+      # AI Providers
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-4096}
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.7}
+      - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-60000}
+      
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-opus-20240229}
+      - ANTHROPIC_MAX_TOKENS=${ANTHROPIC_MAX_TOKENS:-4096}
+      - ANTHROPIC_TEMPERATURE=${ANTHROPIC_TEMPERATURE:-0.7}
+      - ANTHROPIC_TIMEOUT=${ANTHROPIC_TIMEOUT:-60000}
+      
+      # General AI Settings
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_TEMPERATURE=${AI_TEMPERATURE:-0.7}
+      - AI_MAX_TOKENS=${AI_MAX_TOKENS:-4096}
+      
+      # Security - Production
+      - AI_API_KEYS=${AI_API_KEYS}
+      - AI_RATE_LIMIT_ENABLED=${AI_RATE_LIMIT_ENABLED:-true}
+      - AI_RATE_LIMIT_MAX_REQUESTS=${AI_RATE_LIMIT_MAX_REQUESTS:-1000}
+      - AI_RATE_LIMIT_WINDOW_MS=${AI_RATE_LIMIT_WINDOW_MS:-60000}
+      - AI_RATE_LIMIT_SKIP_SUCCESSFUL=${AI_RATE_LIMIT_SKIP_SUCCESSFUL:-false}
+      
+      # Caching - Production
+      - AI_ENABLE_CACHING=${AI_ENABLE_CACHING:-true}
+      - AI_CACHE_TTL=${AI_CACHE_TTL:-3600}
+      - AI_CACHE_MAX_ITEMS=${AI_CACHE_MAX_ITEMS:-10000}
+      
+      # Feature Flags - Production
+      - AI_ENABLE_APPLICATION_GENERATION=${AI_ENABLE_APPLICATION_GENERATION:-true}
+      - AI_ENABLE_WORKFLOW_GENERATION=${AI_ENABLE_WORKFLOW_GENERATION:-true}
+      - AI_ENABLE_ANALYTICS=${AI_ENABLE_ANALYTICS:-true}
+      - AI_ENABLE_AUTOMATION=${AI_ENABLE_AUTOMATION:-true}
+      - AI_ENABLE_DEBUGGING=${AI_ENABLE_DEBUGGING:-false}
+      
+      # Performance - Production
+      - AI_MAX_CONCURRENT_REQUESTS=${AI_MAX_CONCURRENT_REQUESTS:-50}
+      - AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-30000}
+      - AI_RETRY_ATTEMPTS=${AI_RETRY_ATTEMPTS:-3}
+      - AI_RETRY_BACKOFF_MS=${AI_RETRY_BACKOFF_MS:-1000}
+      
+      # Monitoring - Production
+      - AI_ENABLE_METRICS=${AI_ENABLE_METRICS:-true}
+      - AI_METRICS_PORT=${AI_METRICS_PORT:-9090}
+      - AI_ENABLE_HEALTH_CHECK=${AI_ENABLE_HEALTH_CHECK:-true}
+      
+      # Integration with Appsmith
+      - APPSMITH_API_URL=http://appsmith:8080/api/v1
+      - APPSMITH_API_KEY=${APPSMITH_API_KEY}
+      
+      # Logging - Production
+      - AI_ENABLE_AUDIT_LOGS=${AI_ENABLE_AUDIT_LOGS:-true}
+      - AI_LOG_FILE_PATH=/var/log/vyenfita/ai.log
+    volumes:
+      # Production logs
+      - ./logs/ai:/var/log/vyenfita
+      # Optional: mount for configuration
+      # - ./app/ai/config:/app/config
+    ports:
+      - "3001:3001"
+      - "9090:9090"
+    networks:
+      - appsmith
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}) || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - appsmith
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 1024M
+
+  # ==========================================================
+  # APPSMITH - PRODUCTION
+  # ==========================================================
+  appsmith:
+    image: appsmith/appsmith-ce:latest
+    container_name: appsmith-prod
+    restart: always
+    environment:
+      # Database
+      - APPSMITH_DB_URL=${APPSMITH_DB_URL}
+      - APPSMITH_REDIS_HOST=${APPSMITH_REDIS_HOST:-redis}
+      - APPSMITH_REDIS_PORT=${APPSMITH_REDIS_PORT:-6379}
+      - APPSMITH_REDIS_PASSWORD=${APPSMITH_REDIS_PASSWORD}
+      
+      # Encryption
+      - APPSMITH_ENCRYPTION_PASSWORD=${APPSMITH_ENCRYPTION_PASSWORD}
+      - APPSMITH_ENCRYPTION_SALT=${APPSMITH_ENCRYPTION_SALT}
+      
+      # JWT
+      - APPSMITH_JWT_SECRET=${APPSMITH_JWT_SECRET}
+      - APPSMITH_JWT_EXPIRY=${APPSMITH_JWT_EXPIRY:-86400000}
+      
+      # Mail
+      - APPSMITH_MAIL_ENABLED=${APPSMITH_MAIL_ENABLED:-false}
+      - APPSMITH_MAIL_HOST=${APPSMITH_MAIL_HOST}
+      - APPSMITH_MAIL_PORT=${APPSMITH_MAIL_PORT}
+      - APPSMITH_MAIL_USERNAME=${APPSMITH_MAIL_USERNAME}
+      - APPSMITH_MAIL_PASSWORD=${APPSMITH_MAIL_PASSWORD}
+      - APPSMITH_MAIL_FROM=${APPSMITH_MAIL_FROM}
+      
+      # Git Storage
+      - APPSMITH_GIT_ROOT=${APPSMITH_GIT_ROOT:-./container-volumes/git-storage}
+      
+      # AI Integration
+      - APPSMITH_AI_ENABLED=${APPSMITH_AI_ENABLED:-true}
+      - APPSMITH_AI_SERVICE_URL=${APPSMITH_AI_SERVICE_URL:-http://vyenfita-ai:3001}
+      - APPSMITH_AI_API_KEY=${APPSMITH_AI_API_KEY}
+      - APPSMITH_AI_TIMEOUT=${APPSMITH_AI_TIMEOUT:-30000}
+      - APPSMITH_AI_DEFAULT_PROVIDER=${APPSMITH_AI_DEFAULT_PROVIDER:-openai}
+      
+      # AI Feature Flags
+      - APPSMITH_FEATURE_AI_APPLICATION_GENERATION=${APPSMITH_FEATURE_AI_APPLICATION_GENERATION:-true}
+      - APPSMITH_FEATURE_AI_WORKFLOW_GENERATION=${APPSMITH_FEATURE_AI_WORKFLOW_GENERATION:-true}
+      - APPSMITH_FEATURE_AI_AUTOMATION=${APPSMITH_FEATURE_AI_AUTOMATION:-true}
+      - APPSMITH_FEATURE_AI_ANALYTICS=${APPSMITH_FEATURE_AI_ANALYTICS:-true}
+      
+      # AI Health Check
+      - APPSMITH_AI_HEALTH_CHECK_INTERVAL=${APPSMITH_AI_HEALTH_CHECK_INTERVAL:-60}
+      - APPSMITH_AI_HEALTH_CHECK_TIMEOUT=${APPSMITH_AI_HEALTH_CHECK_TIMEOUT:-5}
+      
+      # AI Retry
+      - APPSMITH_AI_RETRY_ATTEMPTS=${APPSMITH_AI_RETRY_ATTEMPTS:-3}
+      - APPSMITH_AI_RETRY_BACKOFF_MS=${APPSMITH_AI_RETRY_BACKOFF_MS:-1000}
+      
+      # AI Circuit Breaker
+      - APPSMITH_AI_CIRCUIT_BREAKER_ENABLED=${APPSMITH_AI_CIRCUIT_BREAKER_ENABLED:-true}
+      - APPSMITH_AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD=${APPSMITH_AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-5}
+      - APPSMITH_AI_CIRCUIT_BREAKER_TIMEOUT_MS=${APPSMITH_AI_CIRCUIT_BREAKER_TIMEOUT_MS:-30000}
+      
+      # Enterprise Features
+      - APPSMITH_TENANT_ENABLED=${APPSMITH_TENANT_ENABLED:-true}
+      - APPSMITH_TENANT_DEFAULT=${APPSMITH_TENANT_DEFAULT:-default}
+      - APPSMITH_FEATURE_SSO=${APPSMITH_FEATURE_SSO:-false}
+      - APPSMITH_FEATURE_AUDIT_LOGS=${APPSMITH_FEATURE_AUDIT_LOGS:-false}
+      - APPSMITH_FEATURE_ADVANCED_RBAC=${APPSMITH_FEATURE_ADVANCED_RBAC:-false}
+      - APPSMITH_FEATURE_AI_PREMIUM=${APPSMITH_FEATURE_AI_PREMIUM:-false}
+      - APPSMITH_FEATURE_UNLIMITED_WORKSPACES=${APPSMITH_FEATURE_UNLIMITED_WORKSPACES:-false}
+      - APPSMITH_ENTERPRISE_ENABLED=${APPSMITH_ENTERPRISE_ENABLED:-false}
+      - APPSMITH_COMMERCIAL_PLAN=${APPSMITH_COMMERCIAL_PLAN:-community}
+      
+      # Branding
+      - APPSMITH_BRANDING_NAME=${APPSMITH_BRANDING_NAME:-VYENFITA}
+      - APPSMITH_BRANDING_LOGO=${APPSMITH_BRANDING_LOGO:-/images/vyenfita-logo.png}
+      - APPSMITH_BRANDING_COPYRIGHT=${APPSMITH_BRANDING_COPYRIGHT:-VYENFITA Team}
+      - APPSMITH_BRANDING_URL=${APPSMITH_BRANDING_URL:-https://github.com/kryntelxf/VYENFITA}
+      
+      # CORS
+      - APPSMITH_CORS_ALLOWED_ORIGINS=${APPSMITH_CORS_ALLOWED_ORIGINS:-*}
+      
+      # Rate Limiting
+      - APPSMITH_RATE_LIMIT_ENABLED=${APPSMITH_RATE_LIMIT_ENABLED:-true}
+      - APPSMITH_RATE_LIMIT_MAX_REQUESTS=${APPSMITH_RATE_LIMIT_MAX_REQUESTS:-1000}
+      
+      # Logging
+      - APPSMITH_LOG_LEVEL=${APPSMITH_LOG_LEVEL:-INFO}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - ./container-volumes/git-storage:/git-storage
+      - ./container-volumes/uploads:/uploads
+      - ./container-volumes/plugins:/plugins
+    networks:
+      - appsmith
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      - mongodb
+      - redis
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+        reservations:
+          memory: 2048M
+
+  # ==========================================================
+  # MONGODB - PRODUCTION
+  # ==========================================================
+  mongodb:
+    image: mongo:7
+    container_name: mongodb-prod
+    restart: always
+    command: mongod --replSet rs0 --bind_ip_all
+    environment:
+      - MONGO_INITDB_DATABASE=appsmith
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./container-volumes/mongodb:/data/db
+      - ./container-volumes/mongodb-init:/docker-entrypoint-initdb.d
+    networks:
+      - appsmith
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+        reservations:
+          memory: 1024M
+
+  # ==========================================================
+  # REDIS - PRODUCTION
+  # ==========================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis-prod
+    restart: always
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./container-volumes/redis:/data
+    networks:
+      - appsmith
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ==========================================================
+  # NGINX - PRODUCTION (Optional)
+  # ==========================================================
+  # Uncomment below for production-grade reverse proxy
+  # ==========================================================
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: nginx-prod
+  #   restart: always
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+  #     - ./nginx/ssl:/etc/nginx/ssl
+  #     - ./nginx/html:/usr/share/nginx/html
+  #   networks:
+  #     - appsmith
+  #   depends_on:
+  #     - appsmith
+  #     - vyenfita-ai
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "10"
+
+# ============================================================
+# NETWORKS
+# ============================================================
+networks:
+  appsmith:
+    name: appsmith
+    driver: bridge
+
+# ============================================================
+# VOLUMES
+# ============================================================
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  git_storage:
+    driver: local
+  uploads:
+    driver: local
+  plugins:
+    driver: local
+  ai_logs:
+    driver: local
