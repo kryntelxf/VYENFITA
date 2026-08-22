@@ -1,21 +1,27 @@
 import { AIService } from './ai.service';
 import { ChatCompletionParams, ChatMessage } from '../interfaces/ai-provider.interface';
+import { ApplicationSpecValidator, ValidationResult, ValidationError } from '../validators/application-spec.validator';
+import { ApplicationSpec } from '../schemas/application-spec.schema';
+import { ApplicationRepairService } from './application-repair.service';
 
 /**
  * Application Generator Service
  * Generates application structure and code from natural language description
+ * with self-correction capability
  */
 export class ApplicationGeneratorService {
   private aiService: AIService;
+  private repairService: ApplicationRepairService;
 
   constructor(aiService: AIService) {
     this.aiService = aiService;
+    this.repairService = new ApplicationRepairService(aiService);
   }
 
   /**
-   * Generate application from description
+   * Generate application from description (legacy)
    */
-  async generateApplication(description: string, context?: Record<string, any>): Promise<GeneratedApplication> {
+  async generateApplication(description: string, context?: Record<string, any>): Promise<any> {
     const systemPrompt = this.getSystemPrompt();
     const userPrompt = this.buildUserPrompt(description, context);
 
@@ -34,9 +40,53 @@ export class ApplicationGeneratorService {
   }
 
   /**
+   * Generate application with self-correction
+   * This is the main entry point for application generation
+   */
+  async generateApplicationWithSelfCorrection(
+    description: string, 
+    context?: Record<string, any>,
+    maxAttempts: number = 3
+  ): Promise<GeneratedApplicationWithRepair> {
+    // Step 1: Generate initial application
+    const initialSpec = await this.generateApplication(description, context);
+    
+    // Step 2: Validate
+    const validation = ApplicationSpecValidator.validate(initialSpec);
+    
+    if (validation.isValid && validation.data) {
+      return {
+        success: true,
+        spec: validation.data,
+        validation,
+        repairAttempts: 0,
+        isRepaired: false,
+      };
+    }
+
+    // Step 3: Repair if invalid
+    const repairResult = await this.repairService.repair(initialSpec);
+    
+    // Step 4: Final validation
+    const finalValidation = repairResult.success && repairResult.spec
+      ? ApplicationSpecValidator.validate(repairResult.spec)
+      : validation;
+
+    return {
+      success: repairResult.success,
+      spec: repairResult.spec,
+      validation: finalValidation,
+      repairAttempts: repairResult.repairAttempts,
+      isRepaired: true,
+      originalErrors: repairResult.originalErrors,
+      fixedErrors: repairResult.fixedErrors,
+    };
+  }
+
+  /**
    * Generate workflow from description
    */
-  async generateWorkflow(description: string): Promise<GeneratedWorkflow> {
+  async generateWorkflow(description: string): Promise<any> {
     const systemPrompt = this.getWorkflowSystemPrompt();
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -53,9 +103,46 @@ export class ApplicationGeneratorService {
   }
 
   /**
+   * Generate workflow with self-correction
+   */
+  async generateWorkflowWithSelfCorrection(
+    description: string,
+    maxAttempts: number = 3
+  ): Promise<GeneratedWorkflowWithRepair> {
+    // Step 1: Generate initial workflow
+    const initialSpec = await this.generateWorkflow(description);
+    
+    // Step 2: Validate (simplified validation for workflow)
+    const validation = this.validateWorkflow(initialSpec);
+    
+    if (validation.isValid) {
+      return {
+        success: true,
+        spec: initialSpec,
+        validation,
+        repairAttempts: 0,
+        isRepaired: false,
+      };
+    }
+
+    // Step 3: Repair if invalid
+    const repairResult = await this.repairService.repairWorkflow(initialSpec, validation.errors);
+    
+    return {
+      success: repairResult.success,
+      spec: repairResult.spec,
+      validation: repairResult.success ? { isValid: true, errors: [], warnings: [] } : validation,
+      repairAttempts: repairResult.repairAttempts,
+      isRepaired: true,
+      originalErrors: validation.errors,
+      fixedErrors: repairResult.fixedErrors,
+    };
+  }
+
+  /**
    * Generate data model from description
    */
-  async generateDataModel(description: string): Promise<GeneratedDataModel> {
+  async generateDataModel(description: string): Promise<any> {
     const systemPrompt = `You are VYENFITA, an expert data architect. Generate a complete data model based on the user's description.
 
 Your response must be a valid JSON object with this structure:
@@ -107,7 +194,7 @@ Your response must be a valid JSON object with this structure:
   /**
    * Generate API specifications from description
    */
-  async generateAPI(description: string): Promise<GeneratedAPI> {
+  async generateAPI(description: string): Promise<any> {
     const systemPrompt = `You are VYENFITA, an expert API designer. Generate a complete REST API specification based on the user's description.
 
 Your response must be a valid JSON object with this structure:
@@ -159,6 +246,10 @@ Your response must be a valid JSON object with this structure:
     return this.parseAPI(response.choices[0].message.content);
   }
 
+  // ============================================================
+  // PRIVATE METHODS
+  // ============================================================
+
   private getSystemPrompt(): string {
     return `You are VYENFITA, an AI application builder with expertise in low-code and no-code platforms.
 
@@ -166,77 +257,203 @@ Generate complete application structures based on user descriptions. Your output
 
 Your response must be a valid JSON object with this exact structure:
 {
-  "name": "Application Name",
-  "description": "Application description",
-  "version": "1.0.0",
-  "pages": [
+  "metadata": {
+    "name": "Application Name",
+    "description": "Application description",
+    "version": "1.0.0"
+  },
+  "requirements": [
     {
-      "id": "page-1",
-      "name": "Page Name",
-      "type": "dashboard|form|table|custom|login|profile|settings",
-      "path": "/page-url",
-      "widgets": [
+      "id": "req-1",
+      "title": "Requirement title",
+      "description": "Requirement description",
+      "priority": "critical|high|medium|low",
+      "category": "functional|non-functional|security|compliance",
+      "acceptanceCriteria": ["criterion 1", "criterion 2"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "entity-1",
+      "name": "EntityName",
+      "description": "Entity description",
+      "fields": [
         {
-          "id": "widget-1",
-          "type": "text|button|table|chart|form|input|select|datepicker|filepicker|map|image|video|iframe",
-          "props": {
-            "label": "Widget Label",
-            "placeholder": "Placeholder text",
-            "value": "Default value",
-            "options": ["Option 1", "Option 2"],
-            "width": "100%",
-            "height": "auto"
-          }
+          "id": "field-1",
+          "name": "fieldName",
+          "type": "string|number|boolean|date|datetime|object|array|reference|email|phone|url|json|file|image|password",
+          "required": true|false,
+          "unique": true|false,
+          "description": "Field description"
         }
       ],
-      "actions": [
+      "relationships": [
         {
-          "id": "action-1",
-          "type": "submit|reset|navigate|api-call|database-query|file-upload|download",
-          "config": {
-            "method": "GET|POST|PUT|DELETE",
-            "url": "/api/endpoint",
-            "body": {}
-          }
+          "id": "rel-1",
+          "type": "one-to-one|one-to-many|many-to-many",
+          "target": "TargetEntity",
+          "sourceField": "sourceFieldId",
+          "targetField": "targetFieldId",
+          "cascadeDelete": true|false
         }
       ]
     }
   ],
-  "datasources": [
+  "dataSources": [
     {
       "id": "ds-1",
       "name": "Datasource Name",
-      "type": "api|database|file|external-service",
+      "type": "api|database|file|external-service|webhook",
       "config": {
         "url": "https://api.example.com",
-        "authType": "none|basic|bearer|oauth2",
-        "headers": {}
-      }
+        "authType": "none|basic|bearer|oauth2|api-key",
+        "headers": {},
+        "databaseType": "postgres|mysql|mongodb|sqlite"
+      },
+      "isDefault": true|false
+    }
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page Name",
+      "path": "/page-url",
+      "type": "dashboard|form|table|custom|login|profile|settings|reports",
+      "layout": "full|sidebar|split",
+      "widgets": [
+        {
+          "id": "widget-1",
+          "type": "text|button|table|chart|form|input|select|datepicker|filepicker|map|image|video|iframe|card|list|grid|tabs|accordion",
+          "props": {
+            "label": "Widget Label",
+            "placeholder": "Placeholder text"
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 4
+          },
+          "actions": []
+        }
+      ]
     }
   ],
   "queries": [
     {
       "id": "query-1",
       "name": "Query Name",
-      "datasourceId": "ds-1",
+      "dataSourceId": "ds-1",
       "query": "SELECT * FROM users WHERE id = :id",
       "parameters": [
         {
           "name": "id",
-          "type": "number",
-          "required": true
+          "type": "string|number|boolean|date|array",
+          "required": true|false
         }
-      ]
+      ],
+      "validation": {
+        "timeout": 10000,
+        "maxRows": 1000
+      },
+      "isReadOnly": true|false
     }
   ],
-  "state": {
-    "variables": [
-      {
-        "name": "variableName",
-        "type": "string|number|boolean|object|array",
-        "default": "default value"
+  "workflows": [
+    {
+      "id": "wf-1",
+      "name": "Workflow Name",
+      "description": "Workflow description",
+      "triggers": [
+        {
+          "id": "trigger-1",
+          "type": "schedule|event|webhook|manual|api",
+          "config": {
+            "schedule": "0 9 * * 1"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "id": "step-1",
+          "name": "Step Name",
+          "type": "action|condition|loop|wait|parallel|subflow|notification",
+          "action": "send_email|update_database|call_api|notify|transform|filter|aggregate|approval|webhook",
+          "config": {},
+          "conditions": [],
+          "onError": "continue|stop|retry|notify"
+        }
+      ],
+      "errorHandling": {
+        "retryCount": 3,
+        "retryDelay": 5000,
+        "notifyOnError": true,
+        "notifyTo": ["admin@example.com"]
       }
-    ]
+    }
+  ],
+  "roles": [
+    {
+      "id": "role-1",
+      "name": "Admin",
+      "description": "Administrator role",
+      "permissions": [
+        {
+          "resource": "*",
+          "action": "create|read|update|delete|execute|approve"
+        }
+      ],
+      "isDefault": false,
+      "isAdmin": true
+    },
+    {
+      "id": "role-2",
+      "name": "User",
+      "description": "Regular user role",
+      "permissions": [
+        {
+          "resource": "data",
+          "action": "read"
+        }
+      ],
+      "isDefault": true,
+      "isAdmin": false
+    }
+  ],
+  "integrations": [
+    {
+      "id": "int-1",
+      "name": "Slack",
+      "type": "slack|email|sms|webhook|zapier|make|salesforce|hubspot",
+      "config": {},
+      "isEnabled": true
+    }
+  ],
+  "tests": {
+    "unit": [],
+    "integration": [],
+    "security": []
+  },
+  "deployment": {
+    "environments": [
+      {
+        "name": "development",
+        "url": "http://localhost:8080",
+        "config": {},
+        "variables": {}
+      }
+    ],
+    "autoDeploy": false,
+    "requireApproval": true,
+    "healthCheck": {
+      "path": "/health",
+      "timeout": 5000,
+      "expectedStatus": 200
+    }
+  },
+  "audit": {
+    "changes": [],
+    "logs": []
   }
 }`;
   }
@@ -248,6 +465,7 @@ Generate automation workflows based on user descriptions. Your workflows must be
 
 Your response must be a valid JSON object with this exact structure:
 {
+  "id": "wf-1",
   "name": "Workflow Name",
   "description": "Workflow description",
   "version": "1.0.0",
@@ -256,9 +474,9 @@ Your response must be a valid JSON object with this exact structure:
       "id": "trigger-1",
       "type": "schedule|event|webhook|manual|api",
       "config": {
-        "schedule": "0 9 * * 1", // Cron expression for schedule type
-        "event": "user.created", // Event name for event type
-        "webhook": "/webhook/path" // Webhook path for webhook type
+        "schedule": "0 9 * * 1",
+        "event": "user.created",
+        "webhook": "/webhook/path"
       }
     }
   ],
@@ -266,8 +484,8 @@ Your response must be a valid JSON object with this exact structure:
     {
       "id": "step-1",
       "name": "Step Name",
-      "type": "action|condition|loop|wait|parallel|subflow",
-      "action": "send_email|update_database|call_api|notify|transform|filter|aggregate",
+      "type": "action|condition|loop|wait|parallel|subflow|notification",
+      "action": "send_email|update_database|call_api|notify|transform|filter|aggregate|approval|webhook",
       "config": {
         "from": "sender@example.com",
         "to": "recipient@example.com",
@@ -277,18 +495,22 @@ Your response must be a valid JSON object with this exact structure:
       "conditions": [
         {
           "field": "data.field",
-          "operator": "equals|not_equals|greater_than|less_than|contains|starts_with|ends_with",
+          "operator": "equals|not_equals|greater_than|less_than|contains|starts_with|ends_with|is_true|is_false|is_null",
           "value": "expected value"
         }
       ],
-      "onError": "continue|stop|retry"
+      "onError": "continue|stop|retry|notify",
+      "retryConfig": {
+        "maxAttempts": 3,
+        "delayMs": 5000
+      }
     }
   ],
   "errorHandling": {
     "retryCount": 3,
     "retryDelay": 5000,
     "notifyOnError": true,
-    "notifyTo": "admin@example.com"
+    "notifyTo": ["admin@example.com"]
   }
 }`;
   }
@@ -304,7 +526,7 @@ Your response must be a valid JSON object with this exact structure:
     return prompt;
   }
 
-  private parseApplication(content: string): GeneratedApplication {
+  private parseApplication(content: string): any {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -313,8 +535,17 @@ Your response must be a valid JSON object with this exact structure:
       const parsed = JSON.parse(jsonMatch[0]);
       
       // Validate required fields
-      if (!parsed.name || !parsed.pages) {
-        throw new Error('Invalid application structure: missing name or pages');
+      if (!parsed.metadata?.name) {
+        throw new Error('Invalid application structure: missing metadata.name');
+      }
+      if (!parsed.entities || parsed.entities.length === 0) {
+        throw new Error('Invalid application structure: missing entities');
+      }
+      if (!parsed.pages || parsed.pages.length === 0) {
+        throw new Error('Invalid application structure: missing pages');
+      }
+      if (!parsed.roles || parsed.roles.length === 0) {
+        throw new Error('Invalid application structure: missing roles');
       }
       
       return parsed;
@@ -323,7 +554,7 @@ Your response must be a valid JSON object with this exact structure:
     }
   }
 
-  private parseWorkflow(content: string): GeneratedWorkflow {
+  private parseWorkflow(content: string): any {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -331,8 +562,11 @@ Your response must be a valid JSON object with this exact structure:
       }
       const parsed = JSON.parse(jsonMatch[0]);
       
-      if (!parsed.name || !parsed.steps) {
-        throw new Error('Invalid workflow structure: missing name or steps');
+      if (!parsed.name) {
+        throw new Error('Invalid workflow structure: missing name');
+      }
+      if (!parsed.steps || parsed.steps.length === 0) {
+        throw new Error('Invalid workflow structure: missing steps');
       }
       
       return parsed;
@@ -341,7 +575,7 @@ Your response must be a valid JSON object with this exact structure:
     }
   }
 
-  private parseDataModel(content: string): GeneratedDataModel {
+  private parseDataModel(content: string): any {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -353,7 +587,7 @@ Your response must be a valid JSON object with this exact structure:
     }
   }
 
-  private parseAPI(content: string): GeneratedAPI {
+  private parseAPI(content: string): any {
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -364,229 +598,87 @@ Your response must be a valid JSON object with this exact structure:
       throw new Error(`Failed to parse API specification: ${error}`);
     }
   }
-}
 
-/**
- * Generated application structure
- */
-export interface GeneratedApplication {
-  name: string;
-  description: string;
-  version: string;
-  pages: GeneratedPage[];
-  datasources: GeneratedDatasource[];
-  queries: GeneratedQuery[];
-  state: {
-    variables: GeneratedVariable[];
-  };
-}
+  // ============================================================
+  // WORKFLOW VALIDATION
+  // ============================================================
 
-/**
- * Generated page structure
- */
-export interface GeneratedPage {
-  id: string;
-  name: string;
-  type: 'dashboard' | 'form' | 'table' | 'custom' | 'login' | 'profile' | 'settings';
-  path: string;
-  widgets: GeneratedWidget[];
-  actions: GeneratedAction[];
-}
+  private validateWorkflow(data: any): ValidationResult {
+    const errors: ValidationError[] = [];
+    const warnings: any[] = [];
 
-/**
- * Generated widget structure
- */
-export interface GeneratedWidget {
-  id: string;
-  type: 'text' | 'button' | 'table' | 'chart' | 'form' | 'input' | 'select' | 'datepicker' | 'filepicker' | 'map' | 'image' | 'video' | 'iframe';
-  props: Record<string, any>;
-}
+    if (!data.name) {
+      errors.push({
+        path: ['name'],
+        message: 'Workflow name is required',
+        type: 'required',
+      });
+    }
 
-/**
- * Generated action structure
- */
-export interface GeneratedAction {
-  id: string;
-  type: 'submit' | 'reset' | 'navigate' | 'api-call' | 'database-query' | 'file-upload' | 'download';
-  config: Record<string, any>;
-}
+    if (!data.steps || data.steps.length === 0) {
+      errors.push({
+        path: ['steps'],
+        message: 'At least one step is required',
+        type: 'required',
+      });
+    }
 
-/**
- * Generated datasource structure
- */
-export interface GeneratedDatasource {
-  id: string;
-  name: string;
-  type: 'api' | 'database' | 'file' | 'external-service';
-  config: Record<string, any>;
-}
-
-/**
- * Generated query structure
- */
-export interface GeneratedQuery {
-  id: string;
-  name: string;
-  datasourceId: string;
-  query: string;
-  parameters: GeneratedParameter[];
-}
-
-/**
- * Generated parameter structure
- */
-export interface GeneratedParameter {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-  required: boolean;
-}
-
-/**
- * Generated variable structure
- */
-export interface GeneratedVariable {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-  default: any;
-}
-
-/**
- * Generated workflow structure
- */
-export interface GeneratedWorkflow {
-  name: string;
-  description: string;
-  version: string;
-  triggers: GeneratedTrigger[];
-  steps: GeneratedWorkflowStep[];
-  errorHandling: {
-    retryCount: number;
-    retryDelay: number;
-    notifyOnError: boolean;
-    notifyTo: string;
-  };
-}
-
-/**
- * Generated trigger structure
- */
-export interface GeneratedTrigger {
-  id: string;
-  type: 'schedule' | 'event' | 'webhook' | 'manual' | 'api';
-  config: Record<string, any>;
-}
-
-/**
- * Generated workflow step structure
- */
-export interface GeneratedWorkflowStep {
-  id: string;
-  name: string;
-  type: 'action' | 'condition' | 'loop' | 'wait' | 'parallel' | 'subflow';
-  action?: 'send_email' | 'update_database' | 'call_api' | 'notify' | 'transform' | 'filter' | 'aggregate';
-  config: Record<string, any>;
-  conditions?: GeneratedCondition[];
-  onError: 'continue' | 'stop' | 'retry';
-}
-
-/**
- * Generated condition structure
- */
-export interface GeneratedCondition {
-  field: string;
-  operator: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'contains' | 'starts_with' | 'ends_with';
-  value: any;
-}
-
-/**
- * Generated data model structure
- */
-export interface GeneratedDataModel {
-  name: string;
-  description: string;
-  entities: GeneratedEntity[];
-  indexes: GeneratedIndex[];
-}
-
-/**
- * Generated entity structure
- */
-export interface GeneratedEntity {
-  name: string;
-  fields: GeneratedField[];
-  relationships: GeneratedRelationship[];
-}
-
-/**
- * Generated field structure
- */
-export interface GeneratedField {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'date' | 'object' | 'array' | 'reference';
-  required: boolean;
-  description?: string;
-}
-
-/**
- * Generated relationship structure
- */
-export interface GeneratedRelationship {
-  type: 'one-to-one' | 'one-to-many' | 'many-to-many';
-  target: string;
-  field: string;
-}
-
-/**
- * Generated index structure
- */
-export interface GeneratedIndex {
-  fields: string[];
-  unique: boolean;
-}
-
-/**
- * Generated API structure
- */
-export interface GeneratedAPI {
-  name: string;
-  description: string;
-  version: string;
-  basePath: string;
-  endpoints: GeneratedEndpoint[];
-}
-
-/**
- * Generated endpoint structure
- */
-export interface GeneratedEndpoint {
-  path: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-  summary: string;
-  description: string;
-  parameters: GeneratedAPIParameter[];
-  responses: Record<string, GeneratedAPIResponse>;
-}
-
-/**
- * Generated API parameter structure
- */
-export interface GeneratedAPIParameter {
-  name: string;
-  in: 'query' | 'path' | 'body' | 'header';
-  required: boolean;
-  schema: {
-    type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-    properties?: Record<string, any>;
-  };
-}
-
-/**
- * Generated API response structure
- */
-export interface GeneratedAPIResponse {
-  description: string;
-  schema: {
-    type: 'string' | 'number' | 'boolean' | 'object' | 'array';
-    properties?: Record<string, any>;
-  };
+    if (data.steps) {
+      for (let i = 0; i < data.steps.length; i++) {
+        const step = data.steps[i];
+        if (!step.type) {
+          errors.push({
+            path: ['steps', i, 'type'],
+            message: `Step ${i + 1}: type is required`,
+            type: 'required',
+          });
+        }
+        if (!step.action) {
+          errors.push({
+            path: ['steps', i, 'action'],
+            message: `Step ${i + 1}: action is required`,
+            type: 'required',
+          });
+        }
       }
+    }
+
+    if (!data.triggers || data.triggers.length === 0) {
+      warnings.push({
+        path: ['triggers'],
+        message: 'No triggers defined. Workflow may not run automatically.',
+        type: 'suggestion',
+      });
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      warnings,
+    };
+  }
+}
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export interface GeneratedApplicationWithRepair {
+  success: boolean;
+  spec?: ApplicationSpec;
+  validation: ValidationResult;
+  repairAttempts: number;
+  isRepaired: boolean;
+  originalErrors?: ValidationError[];
+  fixedErrors?: string[];
+}
+
+export interface GeneratedWorkflowWithRepair {
+  success: boolean;
+  spec?: any;
+  validation: ValidationResult;
+  repairAttempts: number;
+  isRepaired: boolean;
+  originalErrors?: ValidationError[];
+  fixedErrors?: string[];
+  }
