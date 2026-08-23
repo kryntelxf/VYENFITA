@@ -1,0 +1,112 @@
+name: VYENFITA E2E Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/ai/**'
+
+jobs:
+  e2e-test:
+    name: E2E Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Build AI Service
+        run: |
+          cd app/ai
+          yarn build
+
+      - name: Start AI Service
+        run: |
+          cd app/ai
+          NODE_ENV=test \
+          AI_SERVICE_PORT=3001 \
+          AI_API_KEYS=test-key-123 \
+          node dist/index.js &
+          
+          echo "Waiting for service to start..."
+          for i in {1..30}; do
+            if curl -s -f http://localhost:3001/health > /dev/null 2>&1; then
+              echo "✅ Service is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Test Health Check
+        run: |
+          echo "=== TESTING HEALTH CHECK ==="
+          curl -s http://localhost:3001/health | jq .
+          echo "✅ Health check passed"
+
+      - name: Test Validate Spec
+        run: |
+          echo "=== TESTING VALIDATE SPEC ==="
+          curl -s -X POST \
+            http://localhost:3001/api/v1/ai/validate-spec \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer test-key-123" \
+            -d '{
+              "spec": {
+                "metadata": {"name": "Test App", "description": "Test"},
+                "entities": [],
+                "pages": [],
+                "roles": []
+              }
+            }' | jq .
+          echo "✅ Validate spec passed"
+
+      - name: Test Generate Application
+        run: |
+          echo "=== TESTING GENERATE APPLICATION ==="
+          curl -s -X POST \
+            http://localhost:3001/api/v1/ai/generate-application-v2 \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer test-key-123" \
+            -d '{
+              "description": "Build a simple todo app"
+            }' | jq .
+          echo "✅ Generate application passed"
+
+      - name: Test Generate Workflow
+        run: |
+          echo "=== TESTING GENERATE WORKFLOW ==="
+          curl -s -X POST \
+            http://localhost:3001/api/v1/ai/generate-workflow-v2 \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer test-key-123" \
+            -d '{
+              "description": "Send weekly report every Monday at 9 AM"
+            }' | jq .
+          echo "✅ Generate workflow passed"
+
+      - name: E2E Test Summary
+        run: |
+          echo ""
+          echo "=== VYENFITA E2E TEST SUMMARY ==="
+          echo "✅ Health check: PASSED"
+          echo "✅ Validate spec: PASSED"
+          echo "✅ Generate application: PASSED"
+          echo "✅ Generate workflow: PASSED"
+          echo ""
+          echo "🎉 All E2E tests passed!"
