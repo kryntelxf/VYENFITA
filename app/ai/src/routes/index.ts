@@ -11,6 +11,8 @@
  * - Provider management
  * - Bulk generation
  * - Generation statistics
+ * - Business Intelligence
+ * - Versioning
  * 
  * @version 1.0.0
  * @since 0.1.0
@@ -20,6 +22,8 @@ import { Router } from 'express';
 import { AIController } from '../controllers/ai.controller';
 import { GenerationController } from '../controllers/generation.controller';
 import { MultiStepController } from '../controllers/multi-step.controller';
+import { BusinessIntelligenceController } from '../controllers/bi.controller';
+import { VersioningController } from '../controllers/versioning.controller';
 import { AuthMiddleware } from '../middleware/auth.middleware';
 import { ValidationMiddleware } from '../middleware/validation.middleware';
 
@@ -34,6 +38,8 @@ export function createAIRouter(): Router {
   const controller = new AIController();
   const generationController = new GenerationController();
   const multiStepController = new MultiStepController();
+  const biController = new BusinessIntelligenceController();
+  const versioningController = new VersioningController();
 
   // ============================================================
   // PUBLIC ROUTES (No authentication required)
@@ -397,6 +403,308 @@ export function createAIRouter(): Router {
   );
 
   // ============================================================
+  // BUSINESS INTELLIGENCE ROUTES
+  // ============================================================
+
+  /**
+   * Ask a business question
+   * POST /api/v1/bi/ask
+   * 
+   * Request body:
+   * {
+   *   "question": "Why did revenue decline this month?",
+   *   "data": [...],
+   *   "context": {}
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "answer": "Revenue declined because...",
+   *     "confidence": 0.85,
+   *     "evidence": [...],
+   *     "recommendations": [...]
+   *   }
+   * }
+   */
+  router.post(
+    '/bi/ask',
+    (req, res) => biController.ask(req, res)
+  );
+
+  /**
+   * Detect anomalies in data
+   * POST /api/v1/bi/anomalies
+   * 
+   * Request body:
+   * {
+   *   "data": [...],
+   *   "metrics": ["revenue", "users", "conversion"]
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "anomalies": [...],
+   *     "summary": "..."
+   *   }
+   * }
+   */
+  router.post(
+    '/bi/anomalies',
+    (req, res) => biController.detectAnomalies(req, res)
+  );
+
+  /**
+   * Generate KPI dashboard
+   * POST /api/v1/bi/kpi
+   * 
+   * Request body:
+   * {
+   *   "data": [...],
+   *   "metrics": ["revenue", "users", "conversion"]
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "metrics": [...],
+   *     "charts": [...],
+   *     "insights": [...]
+   *   }
+   * }
+   */
+  router.post(
+    '/bi/kpi',
+    (req, res) => biController.generateKPI(req, res)
+  );
+
+  /**
+   * Generate predictive analytics
+   * POST /api/v1/bi/predict
+   * 
+   * Request body:
+   * {
+   *   "data": [...],
+   *   "target": "revenue",
+   *   "horizon": "3 months"
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "predictions": [...],
+   *     "trend": "up",
+   *     "confidence": 0.85,
+   *     "recommendations": [...]
+   *   }
+   * }
+   */
+  router.post(
+    '/bi/predict',
+    (req, res) => biController.predict(req, res)
+  );
+
+  /**
+   * Generate business report
+   * POST /api/v1/bi/report
+   * 
+   * Request body:
+   * {
+   *   "data": [...],
+   *   "reportType": "business|financial|sales|marketing",
+   *   "period": "Q1 2024"
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": "...report content..."
+   * }
+   */
+  router.post(
+    '/bi/report',
+    (req, res) => biController.generateReport(req, res)
+  );
+
+  // ============================================================
+  // VERSIONING ROUTES
+  // ============================================================
+
+  /**
+   * Create a new application with initial version
+   * POST /api/v1/versioning/create
+   * 
+   * Request body:
+   * {
+   *   "name": "My Application",
+   *   "spec": {...application spec...},
+   *   "createdBy": "user@example.com"
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "id": "...",
+   *     "name": "My Application",
+   *     "currentVersion": "1.0.0",
+   *     "versions": [...]
+   *   }
+   * }
+   */
+  router.post(
+    '/versioning/create',
+    (req, res) => versioningController.createApplication(req, res)
+  );
+
+  /**
+   * Get all applications
+   * GET /api/v1/versioning/applications
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": [...applications...],
+   *   "count": 5
+   * }
+   */
+  router.get(
+    '/versioning/applications',
+    (req, res) => versioningController.getAllApplications(req, res)
+  );
+
+  /**
+   * Get a specific application
+   * GET /api/v1/versioning/applications/:appId
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {...application...}
+   * }
+   */
+  router.get(
+    '/versioning/applications/:appId',
+    (req, res) => versioningController.getApplication(req, res)
+  );
+
+  /**
+   * Get all versions of an application
+   * GET /api/v1/versioning/applications/:appId/versions
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": [...versions...],
+   *   "count": 3
+   * }
+   */
+  router.get(
+    '/versioning/applications/:appId/versions',
+    (req, res) => versioningController.getVersions(req, res)
+  );
+
+  /**
+   * Get a specific version
+   * GET /api/v1/versioning/applications/:appId/versions/:version
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {...version...}
+   * }
+   */
+  router.get(
+    '/versioning/applications/:appId/versions/:version',
+    (req, res) => versioningController.getVersion(req, res)
+  );
+
+  /**
+   * Get diff between two versions
+   * GET /api/v1/versioning/applications/:appId/versions/:versionFrom/diff/:versionTo
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "versionFrom": "1.0.0",
+   *     "versionTo": "1.1.0",
+   *     "changes": [...],
+   *     "summary": {
+   *       "added": 2,
+   *       "modified": 1,
+   *       "removed": 0
+   *     }
+   *   }
+   * }
+   */
+  router.get(
+    '/versioning/applications/:appId/versions/:versionFrom/diff/:versionTo',
+    (req, res) => versioningController.diff(req, res)
+  );
+
+  /**
+   * Create a new version
+   * POST /api/v1/versioning/applications/:appId/versions
+   * 
+   * Request body:
+   * {
+   *   "spec": {...updated spec...},
+   *   "changeLog": "Added new features",
+   *   "createdBy": "user@example.com"
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {...updated application...}
+   * }
+   */
+  router.post(
+    '/versioning/applications/:appId/versions',
+    (req, res) => versioningController.createVersion(req, res)
+  );
+
+  /**
+   * Rollback to a previous version
+   * POST /api/v1/versioning/applications/:appId/rollback/:version
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "id": "...",
+   *     "currentVersion": "1.1.1",
+   *     "message": "Rolled back to version 1.0.0"
+   *   }
+   * }
+   */
+  router.post(
+    '/versioning/applications/:appId/rollback/:version',
+    (req, res) => versioningController.rollback(req, res)
+  );
+
+  /**
+   * Delete an application
+   * DELETE /api/v1/versioning/applications/:appId
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "message": "Application deleted successfully"
+   * }
+   */
+  router.delete(
+    '/versioning/applications/:appId',
+    (req, res) => versioningController.deleteApplication(req, res)
+  );
+
+  // ============================================================
   // 404 HANDLER (AI routes only)
   // ============================================================
 
@@ -409,6 +717,7 @@ export function createAIRouter(): Router {
       error: 'Route not found',
       message: `Route ${req.method} ${req.path} does not exist`,
       availableRoutes: [
+        // AI Routes
         'GET /health',
         'POST /chat',
         'POST /generate-application',
@@ -422,7 +731,24 @@ export function createAIRouter(): Router {
         'GET /generation-stats',
         'POST /switch-provider',
         'GET /provider',
+        // BI Routes
+        'POST /bi/ask',
+        'POST /bi/anomalies',
+        'POST /bi/kpi',
+        'POST /bi/predict',
+        'POST /bi/report',
+        // Versioning Routes
+        'POST /versioning/create',
+        'GET /versioning/applications',
+        'GET /versioning/applications/:appId',
+        'GET /versioning/applications/:appId/versions',
+        'GET /versioning/applications/:appId/versions/:version',
+        'GET /versioning/applications/:appId/versions/:from/diff/:to',
+        'POST /versioning/applications/:appId/versions',
+        'POST /versioning/applications/:appId/rollback/:version',
+        'DELETE /versioning/applications/:appId',
       ],
+      totalEndpoints: 28,
       timestamp: new Date().toISOString(),
     });
   });
