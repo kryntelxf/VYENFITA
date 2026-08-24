@@ -13,6 +13,7 @@
  * - Generation statistics
  * - Business Intelligence
  * - Versioning
+ * - AI Agents (Requirement, Architecture, Testing)
  * 
  * @version 1.0.0
  * @since 0.1.0
@@ -24,6 +25,7 @@ import { GenerationController } from '../controllers/generation.controller';
 import { MultiStepController } from '../controllers/multi-step.controller';
 import { BusinessIntelligenceController } from '../controllers/bi.controller';
 import { VersioningController } from '../controllers/versioning.controller';
+import { AgentController } from '../controllers/agent.controller';
 import { AuthMiddleware } from '../middleware/auth.middleware';
 import { ValidationMiddleware } from '../middleware/validation.middleware';
 
@@ -40,6 +42,7 @@ export function createAIRouter(): Router {
   const multiStepController = new MultiStepController();
   const biController = new BusinessIntelligenceController();
   const versioningController = new VersioningController();
+  const agentController = new AgentController();
 
   // ============================================================
   // PUBLIC ROUTES (No authentication required)
@@ -705,6 +708,89 @@ export function createAIRouter(): Router {
   );
 
   // ============================================================
+  // AI AGENTS ROUTES
+  // ============================================================
+
+  /**
+   * Analyze requirements
+   * POST /api/v1/agents/analyze-requirements
+   * 
+   * Request body:
+   * {
+   *   "description": "Build a customer support platform...",
+   *   "context": {"industry": "ecommerce"}
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "summary": "...",
+   *     "users": [...],
+   *     "features": [...],
+   *     "constraints": [...],
+   *     "risks": [...],
+   *     "dataRequirements": [...],
+   *     "integrations": [...],
+   *     "successCriteria": [...],
+   *     "complexity": "moderate",
+   *     "estimatedEffort": "3 weeks",
+   *     "recommendedApproach": "..."
+   *   }
+   * }
+   */
+  router.post(
+    '/agents/analyze-requirements',
+    (req, res) => agentController.analyzeRequirements(req, res)
+  );
+
+  /**
+   * Refine requirements based on feedback
+   * POST /api/v1/agents/refine-requirements
+   * 
+   * Request body:
+   * {
+   *   "analysis": {...requirement analysis...},
+   *   "feedback": "Add mobile support for field agents"
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {...refined requirement analysis...}
+   * }
+   */
+  router.post(
+    '/agents/refine-requirements',
+    (req, res) => agentController.refineRequirements(req, res)
+  );
+
+  /**
+   * Generate clarifying questions
+   * POST /api/v1/agents/generate-questions
+   * 
+   * Request body:
+   * {
+   *   "description": "Build a customer support platform..."
+   * }
+   * 
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": [
+   *     "What are the main user roles?",
+   *     "How many concurrent users are expected?",
+   *     "What data sources need to be integrated?"
+   *   ],
+   *   "count": 5
+   * }
+   */
+  router.post(
+    '/agents/generate-questions',
+    (req, res) => agentController.generateQuestions(req, res)
+  );
+
+  // ============================================================
   // 404 HANDLER (AI routes only)
   // ============================================================
 
@@ -716,39 +802,51 @@ export function createAIRouter(): Router {
       success: false,
       error: 'Route not found',
       message: `Route ${req.method} ${req.path} does not exist`,
-      availableRoutes: [
+      availableRoutes: {
         // AI Routes
-        'GET /health',
-        'POST /chat',
-        'POST /generate-application',
-        'POST /generate-workflow',
-        'POST /generate-application-v2',
-        'POST /generate-workflow-v2',
-        'POST /generate-multi-step',
-        'POST /validate-spec',
-        'POST /repair-spec',
-        'POST /bulk-generate',
-        'GET /generation-stats',
-        'POST /switch-provider',
-        'GET /provider',
+        ai: [
+          'GET /health',
+          'POST /chat',
+          'POST /generate-application (deprecated)',
+          'POST /generate-workflow (deprecated)',
+          'POST /generate-application-v2',
+          'POST /generate-workflow-v2',
+          'POST /generate-multi-step',
+          'POST /validate-spec',
+          'POST /repair-spec',
+          'POST /bulk-generate',
+          'GET /generation-stats',
+          'POST /switch-provider',
+          'GET /provider',
+        ],
         // BI Routes
-        'POST /bi/ask',
-        'POST /bi/anomalies',
-        'POST /bi/kpi',
-        'POST /bi/predict',
-        'POST /bi/report',
+        bi: [
+          'POST /bi/ask',
+          'POST /bi/anomalies',
+          'POST /bi/kpi',
+          'POST /bi/predict',
+          'POST /bi/report',
+        ],
         // Versioning Routes
-        'POST /versioning/create',
-        'GET /versioning/applications',
-        'GET /versioning/applications/:appId',
-        'GET /versioning/applications/:appId/versions',
-        'GET /versioning/applications/:appId/versions/:version',
-        'GET /versioning/applications/:appId/versions/:from/diff/:to',
-        'POST /versioning/applications/:appId/versions',
-        'POST /versioning/applications/:appId/rollback/:version',
-        'DELETE /versioning/applications/:appId',
-      ],
-      totalEndpoints: 28,
+        versioning: [
+          'POST /versioning/create',
+          'GET /versioning/applications',
+          'GET /versioning/applications/:appId',
+          'GET /versioning/applications/:appId/versions',
+          'GET /versioning/applications/:appId/versions/:version',
+          'GET /versioning/applications/:appId/versions/:from/diff/:to',
+          'POST /versioning/applications/:appId/versions',
+          'POST /versioning/applications/:appId/rollback/:version',
+          'DELETE /versioning/applications/:appId',
+        ],
+        // Agent Routes
+        agents: [
+          'POST /agents/analyze-requirements',
+          'POST /agents/refine-requirements',
+          'POST /agents/generate-questions',
+        ],
+      },
+      totalEndpoints: 37,
       timestamp: new Date().toISOString(),
     });
   });
