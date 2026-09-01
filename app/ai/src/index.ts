@@ -1,11 +1,7 @@
 /**
  * VYENFITA AI Service - Entry Point
  * 
- * This is the main entry point for the VYENFITA AI Service.
- * It initializes all routes, middleware, and services.
- * 
  * @version 1.0.0
- * @since 0.1.0
  */
 
 import express from 'express';
@@ -15,24 +11,17 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import winston from 'winston';
 
-// Import routes
 import { createAIRouter } from './routes';
 import { createWorkflowRouter } from './routes/workflow.routes';
-
-// Import middleware
+import { createAdvancedRouter } from './routes/advanced.routes';
 import { AuthMiddleware } from './middleware/auth.middleware';
-
-// Import config
 import { ProviderConfigManager } from './config/providers.config';
-
-// Import workflow engine for health check
 import { WorkflowEngine } from './core/engine/workflow-engine';
 
-// Load environment variables
 dotenv.config();
 
 // ============================================================
-// LOGGER CONFIGURATION
+// LOGGER
 // ============================================================
 
 const logger = winston.createLogger({
@@ -60,7 +49,6 @@ const logger = winston.createLogger({
 // INITIALIZE SERVICES
 // ============================================================
 
-// Initialize provider configurations
 try {
   ProviderConfigManager.initialize();
   const configured = ProviderConfigManager.getConfiguredProviders();
@@ -69,12 +57,10 @@ try {
   logger.warn('No AI providers configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.');
 }
 
-// Initialize authentication
 const apiKeys = process.env.AI_API_KEYS?.split(',').filter((k) => k.trim()) || [];
 AuthMiddleware.initialize(apiKeys);
 logger.info(`Authentication: ${apiKeys.length > 0 ? 'Enabled' : 'Disabled (development mode)'}`);
 
-// Initialize Workflow Engine for health checks
 const workflowEngine = new WorkflowEngine(logger);
 logger.info('Workflow Engine initialized');
 
@@ -103,9 +89,8 @@ const limiter = rateLimit({
 // MIDDLEWARE
 // ============================================================
 
-// Security headers
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable for development
+  contentSecurityPolicy: false,
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
@@ -113,17 +98,14 @@ app.use(helmet({
   },
 }));
 
-// CORS
 app.use(cors({
   origin: process.env.APPSMITH_API_URL ? [process.env.APPSMITH_API_URL] : '*',
   credentials: true,
 }));
 
-// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limiting
 if (process.env.AI_RATE_LIMIT_ENABLED !== 'false') {
   app.use(limiter);
 }
@@ -141,14 +123,13 @@ app.use((req, res, next) => {
       duration,
       ip: req.ip,
       userAgent: req.headers['user-agent'],
-      contentLength: req.headers['content-length'],
     });
   });
   next();
 });
 
 // ============================================================
-// HEALTH CHECK ENDPOINT (PUBLIC)
+// HEALTH CHECK
 // ============================================================
 
 app.get('/health', (req, res) => {
@@ -163,18 +144,22 @@ app.get('/health', (req, res) => {
       engine: 'active',
       executions: workflowEngine ? 'available' : 'unavailable',
     },
+    endpoints: {
+      ai: 13,
+      workflow: 8,
+      advanced: 26,
+      total: 47,
+    },
   });
 });
 
 // ============================================================
-// API ROUTES
+// ROUTES
 // ============================================================
 
-// AI Routes (chat, generate, validate, repair, etc.)
 app.use('/api/v1/ai', createAIRouter());
-
-// Workflow Routes (execute, generate-and-execute, executions)
 app.use('/api/v1/workflow', createWorkflowRouter());
+app.use('/api/v1/advanced', createAdvancedRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -183,13 +168,14 @@ app.use('/api/v1/workflow', createWorkflowRouter());
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.path} not found`,
+    error: 'Route not found',
+    message: `Route ${req.method} ${req.path} does not exist`,
+    timestamp: new Date().toISOString(),
   });
 });
 
 // ============================================================
-// ERROR HANDLING MIDDLEWARE
+// ERROR HANDLER
 // ============================================================
 
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -205,6 +191,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
     success: false,
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -216,30 +203,19 @@ const server = app.listen(port, host, () => {
   logger.info('🚀 VYENFITA AI Service started');
   logger.info(`📍 URL: http://${host}:${port}`);
   logger.info(`💚 Health check: http://${host}:${port}/health`);
-  logger.info(`🔑 Authentication: ${apiKeys.length > 0 ? 'Enabled' : 'Disabled (dev mode)'}`);
-  logger.info(`🤖 Available providers: ${ProviderConfigManager.getConfiguredProviders().join(', ') || 'none'}`);
-  logger.info(`⚡ Workflow Engine: Active`);
+  logger.info(`🔑 Authentication: ${apiKeys.length > 0 ? 'Enabled' : 'Disabled'}`);
+  logger.info(`🤖 Providers: ${ProviderConfigManager.getConfiguredProviders().join(', ') || 'none'}`);
+  logger.info(`📊 Total Endpoints: 47+`);
   logger.info(`📝 Log level: ${process.env.AI_LOG_LEVEL || 'info'}`);
-  
-  // Log all routes for debugging
-  const routes: string[] = [];
-  app._router?.stack.forEach((layer: any) => {
-    if (layer.route) {
-      const methods = Object.keys(layer.route.methods).join(', ').toUpperCase();
-      routes.push(`${methods} ${layer.route.path}`);
-    }
-  });
-  logger.info(`📋 Available routes: ${routes.length} endpoints`);
 });
 
 // ============================================================
-// GRACEFUL SHUTDOWN
+// SHUTDOWN
 // ============================================================
 
 const shutdown = (signal: string) => {
   logger.info(`${signal} received, shutting down gracefully...`);
   
-  // Cleanup workflow engine
   if (workflowEngine) {
     workflowEngine.cleanup();
     logger.info('Workflow engine cleaned up');
@@ -250,7 +226,6 @@ const shutdown = (signal: string) => {
     process.exit(0);
   });
   
-  // Force shutdown after 10 seconds
   setTimeout(() => {
     logger.error('Forced shutdown');
     process.exit(1);
@@ -260,21 +235,12 @@ const shutdown = (signal: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-// ============================================================
-// UNCAUGHT EXCEPTIONS
-// ============================================================
-
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught exception:', error);
-  // Don't exit immediately, try to recover
 });
 
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection:', reason);
 });
-
-// ============================================================
-// EXPORTS
-// ============================================================
 
 export { app, server, logger, workflowEngine };
