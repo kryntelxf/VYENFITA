@@ -207,4 +207,69 @@ export class SecurityScannerService {
   }
 
   /**
-   * Calculate security score (
+   * Calculate security score (0-100)
+   */
+  private calculateScore(findings: SecurityFinding[]): number {
+    const weights = {
+      critical: 40,
+      high: 20,
+      medium: 10,
+      low: 5,
+      info: 0,
+    };
+
+    let score = 100;
+    for (const finding of findings) {
+      score -= weights[finding.severity];
+    }
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /**
+   * Calculate security grade
+   */
+  private calculateGrade(findings: SecurityFinding[]): 'A' | 'B' | 'C' | 'D' | 'F' {
+    const score = this.calculateScore(findings);
+    if (score >= 90) return 'A';
+    if (score >= 80) return 'B';
+    if (score >= 70) return 'C';
+    if (score >= 60) return 'D';
+    return 'F';
+  }
+
+  /**
+   * Get a security scan
+   */
+  getScan(id: string): SecurityScan | undefined {
+    return this.scans.get(id);
+  }
+
+  /**
+   * Get all scans for an application
+   */
+  getScans(applicationId: string): SecurityScan[] {
+    const result: SecurityScan[] = [];
+    for (const scan of this.scans.values()) {
+      if (scan.applicationId === applicationId) {
+        result.push(scan);
+      }
+    }
+    return result.sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
+  }
+
+  /**
+   * Get latest scan for an application
+   */
+  getLatestScan(applicationId: string): SecurityScan | undefined {
+    const scans = this.getScans(applicationId);
+    return scans.length > 0 ? scans[0] : undefined;
+  }
+
+  /**
+   * Sleep for a duration
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
