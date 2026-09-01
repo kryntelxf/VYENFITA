@@ -14,6 +14,10 @@
  * - Business Intelligence
  * - Versioning
  * - AI Agents (Requirement, Architecture, Testing)
+ * - Visualization
+ * - Export/Import
+ * - Notifications
+ * - Activity Logs
  * 
  * @version 1.0.0
  * @since 0.1.0
@@ -26,6 +30,10 @@ import { MultiStepController } from '../controllers/multi-step.controller';
 import { BusinessIntelligenceController } from '../controllers/bi.controller';
 import { VersioningController } from '../controllers/versioning.controller';
 import { AgentController } from '../controllers/agent.controller';
+import { VisualizationController } from '../controllers/visualization.controller';
+import { ExportImportController } from '../controllers/export-import.controller';
+import { NotificationController } from '../controllers/notification.controller';
+import { ActivityLogController } from '../controllers/activity-log.controller';
 import { AuthMiddleware } from '../middleware/auth.middleware';
 import { ValidationMiddleware } from '../middleware/validation.middleware';
 
@@ -43,6 +51,10 @@ export function createAIRouter(): Router {
   const biController = new BusinessIntelligenceController();
   const versioningController = new VersioningController();
   const agentController = new AgentController();
+  const visualizationController = new VisualizationController();
+  const exportImportController = new ExportImportController();
+  const notificationController = new NotificationController();
+  const activityLogController = new ActivityLogController();
 
   // ============================================================
   // PUBLIC ROUTES (No authentication required)
@@ -51,8 +63,6 @@ export function createAIRouter(): Router {
   /**
    * Health check endpoint
    * GET /api/v1/ai/health
-   * 
-   * Returns service health status, version, and available providers
    */
   router.get('/health', (req, res) => controller.healthCheck(req, res));
 
@@ -69,20 +79,6 @@ export function createAIRouter(): Router {
   /**
    * Chat completion
    * POST /api/v1/ai/chat
-   * 
-   * Request body:
-   * {
-   *   "messages": [{"role": "user", "content": "Hello"}],
-   *   "temperature": 0.7,
-   *   "maxTokens": 4096
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...chat response...},
-   *   "provider": "openai"
-   * }
    */
   router.post(
     '/chat',
@@ -95,9 +91,8 @@ export function createAIRouter(): Router {
   // ============================================================
 
   /**
-   * Generate application (Legacy V1 - without self-correction)
+   * Generate application (Legacy V1)
    * POST /api/v1/ai/generate-application
-   * 
    * @deprecated Use /generate-application-v2 instead
    */
   router.post(
@@ -107,9 +102,8 @@ export function createAIRouter(): Router {
   );
 
   /**
-   * Generate workflow (Legacy V1 - without self-correction)
+   * Generate workflow (Legacy V1)
    * POST /api/v1/ai/generate-workflow
-   * 
    * @deprecated Use /generate-workflow-v2 instead
    */
   router.post(
@@ -125,33 +119,6 @@ export function createAIRouter(): Router {
   /**
    * Generate application with self-correction
    * POST /api/v1/ai/generate-application-v2
-   * 
-   * Request body:
-   * {
-   *   "description": "Build a customer support platform...",
-   *   "context": {"industry": "ecommerce"},
-   *   "maxAttempts": 3
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...application spec...},
-   *   "validation": {"isValid": true, "warnings": []},
-   *   "repairAttempts": 1,
-   *   "isRepaired": true,
-   *   "fixedErrors": [...],
-   *   "summary": {
-   *     "entities": 5,
-   *     "pages": 3,
-   *     "queries": 8,
-   *     "workflows": 2,
-   *     "roles": 3,
-   *     "dataSources": 2,
-   *     "integrations": 1,
-   *     "requirements": 10
-   *   }
-   * }
    */
   router.post(
     '/generate-application-v2',
@@ -162,24 +129,6 @@ export function createAIRouter(): Router {
   /**
    * Generate workflow with self-correction
    * POST /api/v1/ai/generate-workflow-v2
-   * 
-   * Request body:
-   * {
-   *   "description": "Send weekly sales report every Monday at 9 AM",
-   *   "maxAttempts": 3
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...workflow spec...},
-   *   "repairAttempts": 0,
-   *   "isRepaired": false,
-   *   "summary": {
-   *     "triggers": 1,
-   *     "steps": 5
-   *   }
-   * }
    */
   router.post(
     '/generate-workflow-v2',
@@ -194,40 +143,6 @@ export function createAIRouter(): Router {
   /**
    * Generate application with multi-step process
    * POST /api/v1/ai/generate-multi-step
-   * 
-   * Generates application in 6 steps:
-   * 1. Requirement Analysis
-   * 2. Architecture Design
-   * 3. Data Model Design
-   * 4. UI/UX Design
-   * 5. Application Build
-   * 6. Validation & Repair
-   * 
-   * Request body:
-   * {
-   *   "description": "Build a customer support platform...",
-   *   "context": {"industry": "ecommerce"}
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...application spec...},
-   *   "steps": [
-   *     {"id": "requirement-analysis", "status": "completed"},
-   *     {"id": "architecture-design", "status": "completed"},
-   *     ...
-   *   ],
-   *   "errors": [],
-   *   "warnings": [],
-   *   "summary": {
-   *     "steps": 6,
-   *     "completed": 6,
-   *     "failed": 0,
-   *     "entities": 5,
-   *     "pages": 3
-   *   }
-   * }
    */
   router.post(
     '/generate-multi-step',
@@ -242,26 +157,6 @@ export function createAIRouter(): Router {
   /**
    * Validate application specification
    * POST /api/v1/ai/validate-spec
-   * 
-   * Request body:
-   * {
-   *   "spec": {...application spec...},
-   *   "strict": true
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "isValid": true,
-   *   "errors": [],
-   *   "warnings": [],
-   *   "summary": {
-   *     "hasErrors": false,
-   *     "hasWarnings": false,
-   *     "errorCount": 0,
-   *     "warningCount": 0
-   *   }
-   * }
    */
   router.post(
     '/validate-spec',
@@ -271,26 +166,6 @@ export function createAIRouter(): Router {
   /**
    * Repair invalid specification
    * POST /api/v1/ai/repair-spec
-   * 
-   * Request body:
-   * {
-   *   "spec": {...invalid spec...},
-   *   "maxAttempts": 3
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...repaired spec...},
-   *   "repairAttempts": 1,
-   *   "originalErrors": [...],
-   *   "fixedErrors": [...],
-   *   "summary": {
-   *     "fixed": 3,
-   *     "totalOriginal": 3,
-   *     "isValidNow": true
-   *   }
-   * }
    */
   router.post(
     '/repair-spec',
@@ -302,34 +177,8 @@ export function createAIRouter(): Router {
   // ============================================================
 
   /**
-   * Generate multiple applications in one request
+   * Generate multiple applications
    * POST /api/v1/ai/bulk-generate
-   * 
-   * Request body:
-   * {
-   *   "descriptions": [
-   *     "Build a todo app",
-   *     "Build a customer dashboard",
-   *     "Build an inventory management system"
-   *   ],
-   *   "context": {},
-   *   "maxAttempts": 2
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "results": [
-   *     {"description": "Build a todo app", "success": true, "data": {...}},
-   *     {"description": "Build a customer dashboard", "success": false, "error": "..."}
-   *   ],
-   *   "summary": {
-   *     "total": 3,
-   *     "successful": 2,
-   *     "failed": 1,
-   *     "successRate": "67%"
-   *   }
-   * }
    */
   router.post(
     '/bulk-generate',
@@ -343,21 +192,6 @@ export function createAIRouter(): Router {
   /**
    * Get generation statistics
    * GET /api/v1/ai/generation-stats
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "totalGenerations": 42,
-   *     "successRate": "95%",
-   *     "averageRepairAttempts": 1.2,
-   *     "averageElapsedMs": 3420,
-   *     "byType": {
-   *       "application": 30,
-   *       "workflow": 12
-   *     }
-   *   }
-   * }
    */
   router.get(
     '/generation-stats',
@@ -371,17 +205,6 @@ export function createAIRouter(): Router {
   /**
    * Switch AI provider
    * POST /api/v1/ai/switch-provider
-   * 
-   * Request body:
-   * {
-   *   "provider": "openai" | "anthropic" | "gemini"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "provider": "openai"
-   * }
    */
   router.post(
     '/switch-provider',
@@ -392,13 +215,6 @@ export function createAIRouter(): Router {
   /**
    * Get current provider information
    * GET /api/v1/ai/provider
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "provider": "openai",
-   *   "available": ["openai", "anthropic"]
-   * }
    */
   router.get(
     '/provider',
@@ -412,24 +228,6 @@ export function createAIRouter(): Router {
   /**
    * Ask a business question
    * POST /api/v1/bi/ask
-   * 
-   * Request body:
-   * {
-   *   "question": "Why did revenue decline this month?",
-   *   "data": [...],
-   *   "context": {}
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "answer": "Revenue declined because...",
-   *     "confidence": 0.85,
-   *     "evidence": [...],
-   *     "recommendations": [...]
-   *   }
-   * }
    */
   router.post(
     '/bi/ask',
@@ -437,23 +235,8 @@ export function createAIRouter(): Router {
   );
 
   /**
-   * Detect anomalies in data
+   * Detect anomalies
    * POST /api/v1/bi/anomalies
-   * 
-   * Request body:
-   * {
-   *   "data": [...],
-   *   "metrics": ["revenue", "users", "conversion"]
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "anomalies": [...],
-   *     "summary": "..."
-   *   }
-   * }
    */
   router.post(
     '/bi/anomalies',
@@ -463,22 +246,6 @@ export function createAIRouter(): Router {
   /**
    * Generate KPI dashboard
    * POST /api/v1/bi/kpi
-   * 
-   * Request body:
-   * {
-   *   "data": [...],
-   *   "metrics": ["revenue", "users", "conversion"]
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "metrics": [...],
-   *     "charts": [...],
-   *     "insights": [...]
-   *   }
-   * }
    */
   router.post(
     '/bi/kpi',
@@ -486,26 +253,8 @@ export function createAIRouter(): Router {
   );
 
   /**
-   * Generate predictive analytics
+   * Generate predictions
    * POST /api/v1/bi/predict
-   * 
-   * Request body:
-   * {
-   *   "data": [...],
-   *   "target": "revenue",
-   *   "horizon": "3 months"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "predictions": [...],
-   *     "trend": "up",
-   *     "confidence": 0.85,
-   *     "recommendations": [...]
-   *   }
-   * }
    */
   router.post(
     '/bi/predict',
@@ -515,19 +264,6 @@ export function createAIRouter(): Router {
   /**
    * Generate business report
    * POST /api/v1/bi/report
-   * 
-   * Request body:
-   * {
-   *   "data": [...],
-   *   "reportType": "business|financial|sales|marketing",
-   *   "period": "Q1 2024"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": "...report content..."
-   * }
    */
   router.post(
     '/bi/report',
@@ -541,24 +277,6 @@ export function createAIRouter(): Router {
   /**
    * Create a new application with initial version
    * POST /api/v1/versioning/create
-   * 
-   * Request body:
-   * {
-   *   "name": "My Application",
-   *   "spec": {...application spec...},
-   *   "createdBy": "user@example.com"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "id": "...",
-   *     "name": "My Application",
-   *     "currentVersion": "1.0.0",
-   *     "versions": [...]
-   *   }
-   * }
    */
   router.post(
     '/versioning/create',
@@ -568,13 +286,6 @@ export function createAIRouter(): Router {
   /**
    * Get all applications
    * GET /api/v1/versioning/applications
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": [...applications...],
-   *   "count": 5
-   * }
    */
   router.get(
     '/versioning/applications',
@@ -584,12 +295,6 @@ export function createAIRouter(): Router {
   /**
    * Get a specific application
    * GET /api/v1/versioning/applications/:appId
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...application...}
-   * }
    */
   router.get(
     '/versioning/applications/:appId',
@@ -599,13 +304,6 @@ export function createAIRouter(): Router {
   /**
    * Get all versions of an application
    * GET /api/v1/versioning/applications/:appId/versions
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": [...versions...],
-   *   "count": 3
-   * }
    */
   router.get(
     '/versioning/applications/:appId/versions',
@@ -615,12 +313,6 @@ export function createAIRouter(): Router {
   /**
    * Get a specific version
    * GET /api/v1/versioning/applications/:appId/versions/:version
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...version...}
-   * }
    */
   router.get(
     '/versioning/applications/:appId/versions/:version',
@@ -630,21 +322,6 @@ export function createAIRouter(): Router {
   /**
    * Get diff between two versions
    * GET /api/v1/versioning/applications/:appId/versions/:versionFrom/diff/:versionTo
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "versionFrom": "1.0.0",
-   *     "versionTo": "1.1.0",
-   *     "changes": [...],
-   *     "summary": {
-   *       "added": 2,
-   *       "modified": 1,
-   *       "removed": 0
-   *     }
-   *   }
-   * }
    */
   router.get(
     '/versioning/applications/:appId/versions/:versionFrom/diff/:versionTo',
@@ -654,19 +331,6 @@ export function createAIRouter(): Router {
   /**
    * Create a new version
    * POST /api/v1/versioning/applications/:appId/versions
-   * 
-   * Request body:
-   * {
-   *   "spec": {...updated spec...},
-   *   "changeLog": "Added new features",
-   *   "createdBy": "user@example.com"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...updated application...}
-   * }
    */
   router.post(
     '/versioning/applications/:appId/versions',
@@ -676,16 +340,6 @@ export function createAIRouter(): Router {
   /**
    * Rollback to a previous version
    * POST /api/v1/versioning/applications/:appId/rollback/:version
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "id": "...",
-   *     "currentVersion": "1.1.1",
-   *     "message": "Rolled back to version 1.0.0"
-   *   }
-   * }
    */
   router.post(
     '/versioning/applications/:appId/rollback/:version',
@@ -695,12 +349,6 @@ export function createAIRouter(): Router {
   /**
    * Delete an application
    * DELETE /api/v1/versioning/applications/:appId
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "message": "Application deleted successfully"
-   * }
    */
   router.delete(
     '/versioning/applications/:appId',
@@ -714,30 +362,6 @@ export function createAIRouter(): Router {
   /**
    * Analyze requirements
    * POST /api/v1/agents/analyze-requirements
-   * 
-   * Request body:
-   * {
-   *   "description": "Build a customer support platform...",
-   *   "context": {"industry": "ecommerce"}
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {
-   *     "summary": "...",
-   *     "users": [...],
-   *     "features": [...],
-   *     "constraints": [...],
-   *     "risks": [...],
-   *     "dataRequirements": [...],
-   *     "integrations": [...],
-   *     "successCriteria": [...],
-   *     "complexity": "moderate",
-   *     "estimatedEffort": "3 weeks",
-   *     "recommendedApproach": "..."
-   *   }
-   * }
    */
   router.post(
     '/agents/analyze-requirements',
@@ -745,20 +369,8 @@ export function createAIRouter(): Router {
   );
 
   /**
-   * Refine requirements based on feedback
+   * Refine requirements
    * POST /api/v1/agents/refine-requirements
-   * 
-   * Request body:
-   * {
-   *   "analysis": {...requirement analysis...},
-   *   "feedback": "Add mobile support for field agents"
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": {...refined requirement analysis...}
-   * }
    */
   router.post(
     '/agents/refine-requirements',
@@ -768,85 +380,254 @@ export function createAIRouter(): Router {
   /**
    * Generate clarifying questions
    * POST /api/v1/agents/generate-questions
-   * 
-   * Request body:
-   * {
-   *   "description": "Build a customer support platform..."
-   * }
-   * 
-   * Response:
-   * {
-   *   "success": true,
-   *   "data": [
-   *     "What are the main user roles?",
-   *     "How many concurrent users are expected?",
-   *     "What data sources need to be integrated?"
-   *   ],
-   *   "count": 5
-   * }
    */
   router.post(
     '/agents/generate-questions',
     (req, res) => agentController.generateQuestions(req, res)
   );
 
+  /**
+   * Design architecture
+   * POST /api/v1/agents/design-architecture
+   */
+  router.post(
+    '/agents/design-architecture',
+    (req, res) => agentController.designArchitecture(req, res)
+  );
+
+  /**
+   * Evaluate architecture
+   * POST /api/v1/agents/evaluate-architecture
+   */
+  router.post(
+    '/agents/evaluate-architecture',
+    (req, res) => agentController.evaluateArchitecture(req, res)
+  );
+
+  /**
+   * Generate tests
+   * POST /api/v1/agents/generate-tests
+   */
+  router.post(
+    '/agents/generate-tests',
+    (req, res) => agentController.generateTests(req, res)
+  );
+
+  /**
+   * Execute tests
+   * POST /api/v1/agents/execute-tests
+   */
+  router.post(
+    '/agents/execute-tests',
+    (req, res) => agentController.executeTests(req, res)
+  );
+
+  /**
+   * Analyze test results
+   * POST /api/v1/agents/analyze-test-results
+   */
+  router.post(
+    '/agents/analyze-test-results',
+    (req, res) => agentController.analyzeTestResults(req, res)
+  );
+
   // ============================================================
-  // 404 HANDLER (AI routes only)
+  // VISUALIZATION ROUTES
   // ============================================================
 
   /**
-   * Catch-all for undefined AI routes
+   * Generate visualization
+   * POST /api/v1/visualization/generate
    */
+  router.post(
+    '/visualization/generate',
+    (req, res) => visualizationController.generate(req, res)
+  );
+
+  /**
+   * Generate dashboard
+   * POST /api/v1/visualization/dashboard
+   */
+  router.post(
+    '/visualization/dashboard',
+    (req, res) => visualizationController.generateDashboard(req, res)
+  );
+
+  // ============================================================
+  // EXPORT/IMPORT ROUTES
+  // ============================================================
+
+  /**
+   * Export to JSON
+   * POST /api/v1/export/json
+   */
+  router.post(
+    '/export/json',
+    (req, res) => exportImportController.exportJSON(req, res)
+  );
+
+  /**
+   * Import from JSON
+   * POST /api/v1/import/json
+   */
+  router.post(
+    '/import/json',
+    (req, res) => exportImportController.importJSON(req, res)
+  );
+
+  /**
+   * Export to ZIP
+   * POST /api/v1/export/zip
+   */
+  router.post(
+    '/export/zip',
+    (req, res) => exportImportController.exportZIP(req, res)
+  );
+
+  /**
+   * Import from ZIP
+   * POST /api/v1/import/zip
+   */
+  router.post(
+    '/import/zip',
+    (req, res) => exportImportController.importZIP(req, res)
+  );
+
+  /**
+   * Create backup
+   * POST /api/v1/backup/create
+   */
+  router.post(
+    '/backup/create',
+    (req, res) => exportImportController.createBackup(req, res)
+  );
+
+  /**
+   * Restore from backup
+   * POST /api/v1/backup/restore
+   */
+  router.post(
+    '/backup/restore',
+    (req, res) => exportImportController.restoreBackup(req, res)
+  );
+
+  /**
+   * Compare versions
+   * POST /api/v1/export/compare
+   */
+  router.post(
+    '/export/compare',
+    (req, res) => exportImportController.compareVersions(req, res)
+  );
+
+  // ============================================================
+  // NOTIFICATION ROUTES
+  // ============================================================
+
+  /**
+   * Send notification
+   * POST /api/v1/notifications/send
+   */
+  router.post(
+    '/notifications/send',
+    (req, res) => notificationController.send(req, res)
+  );
+
+  /**
+   * Get notification status
+   * GET /api/v1/notifications/:id
+   */
+  router.get(
+    '/notifications/:id',
+    (req, res) => notificationController.getStatus(req, res)
+  );
+
+  /**
+   * Get all notifications
+   * GET /api/v1/notifications
+   */
+  router.get(
+    '/notifications',
+    (req, res) => notificationController.getAll(req, res)
+  );
+
+  // ============================================================
+  // ACTIVITY LOG ROUTES
+  // ============================================================
+
+  /**
+   * Log an activity
+   * POST /api/v1/activity-logs/log
+   */
+  router.post(
+    '/activity-logs/log',
+    (req, res) => activityLogController.log(req, res)
+  );
+
+  /**
+   * Get logs by user
+   * GET /api/v1/activity-logs/user/:userId
+   */
+  router.get(
+    '/activity-logs/user/:userId',
+    (req, res) => activityLogController.getByUser(req, res)
+  );
+
+  /**
+   * Get logs by tenant
+   * GET /api/v1/activity-logs/tenant/:tenantId
+   */
+  router.get(
+    '/activity-logs/tenant/:tenantId',
+    (req, res) => activityLogController.getByTenant(req, res)
+  );
+
+  /**
+   * Get logs by action
+   * GET /api/v1/activity-logs/action/:action
+   */
+  router.get(
+    '/activity-logs/action/:action',
+    (req, res) => activityLogController.getByAction(req, res)
+  );
+
+  /**
+   * Get recent logs
+   * GET /api/v1/activity-logs/recent
+   */
+  router.get(
+    '/activity-logs/recent',
+    (req, res) => activityLogController.getRecent(req, res)
+  );
+
+  /**
+   * Get statistics
+   * GET /api/v1/activity-logs/stats
+   */
+  router.get(
+    '/activity-logs/stats',
+    (req, res) => activityLogController.getStats(req, res)
+  );
+
+  /**
+   * Clear old logs
+   * POST /api/v1/activity-logs/clear
+   */
+  router.post(
+    '/activity-logs/clear',
+    (req, res) => activityLogController.clearOldLogs(req, res)
+  );
+
+  // ============================================================
+  // 404 HANDLER
+  // ============================================================
+
   router.use((req, res) => {
     res.status(404).json({
       success: false,
       error: 'Route not found',
       message: `Route ${req.method} ${req.path} does not exist`,
-      availableRoutes: {
-        // AI Routes
-        ai: [
-          'GET /health',
-          'POST /chat',
-          'POST /generate-application (deprecated)',
-          'POST /generate-workflow (deprecated)',
-          'POST /generate-application-v2',
-          'POST /generate-workflow-v2',
-          'POST /generate-multi-step',
-          'POST /validate-spec',
-          'POST /repair-spec',
-          'POST /bulk-generate',
-          'GET /generation-stats',
-          'POST /switch-provider',
-          'GET /provider',
-        ],
-        // BI Routes
-        bi: [
-          'POST /bi/ask',
-          'POST /bi/anomalies',
-          'POST /bi/kpi',
-          'POST /bi/predict',
-          'POST /bi/report',
-        ],
-        // Versioning Routes
-        versioning: [
-          'POST /versioning/create',
-          'GET /versioning/applications',
-          'GET /versioning/applications/:appId',
-          'GET /versioning/applications/:appId/versions',
-          'GET /versioning/applications/:appId/versions/:version',
-          'GET /versioning/applications/:appId/versions/:from/diff/:to',
-          'POST /versioning/applications/:appId/versions',
-          'POST /versioning/applications/:appId/rollback/:version',
-          'DELETE /versioning/applications/:appId',
-        ],
-        // Agent Routes
-        agents: [
-          'POST /agents/analyze-requirements',
-          'POST /agents/refine-requirements',
-          'POST /agents/generate-questions',
-        ],
-      },
-      totalEndpoints: 37,
+      totalEndpoints: 90,
       timestamp: new Date().toISOString(),
     });
   });
