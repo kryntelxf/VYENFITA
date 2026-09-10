@@ -249,3 +249,46 @@ function isRetryableError(error: Error): boolean {
     'P1001', // Can't reach database server
     'P1002', // Database server timeout
     'P1008', // Operations timed out
+    'P1017', // Server has closed the connection
+    'P2024', // Timed out fetching connection
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'ENOTFOUND',
+    'EHOSTUNREACH',
+  ];
+
+  const errorCode = (error as any).code;
+  return retryableCodes.includes(errorCode);
+}
+
+/**
+ * Sleep for a duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ============================================================
+// GRACEFUL SHUTDOWN HANDLERS
+// ============================================================
+
+process.on('beforeExit', async () => {
+  await disconnectDatabase();
+});
+
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, disconnecting database...');
+  await disconnectDatabase();
+});
+
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, disconnecting database...');
+  await disconnectDatabase();
+});
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
+export { Prisma };
+export default prisma;
