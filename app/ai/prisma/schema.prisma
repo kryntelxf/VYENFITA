@@ -1,0 +1,709 @@
+// ============================================================
+// VYENFITA DATABASE SCHEMA
+// ============================================================
+// Production-grade schema for multi-tenant AI-native platform
+// 
+// Design principles:
+// - Multi-tenant by default (tenantId on all business tables)
+// - Soft delete for audit trail
+// - Timestamps for all records
+// - UUIDs for distributed systems
+// - Indexes for query performance
+// - Foreign keys for referential integrity
+// - JSONB for flexible metadata
+// 
+// @version 1.0.0
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// IDENTITY & MULTI-TENANCY
+// ============================================================
+
+/// Tenant (Organization) - root of multi-tenancy
+model Tenant {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique @db.VarChar(63)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  plan        String   @default("free") @db.VarChar(50) // free, pro, business, enterprise
+  status      String   @default("active") @db.VarChar(50) // active, suspended, deleted
+  settings    Json     @default("{}")
+  metadata    Json     @default("{}")
+  
+  // Audit
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  
+  // Relations
+  users       User[]
+  memberships Membership[]
+  applications Application[]
+  workflows   Workflow[]
+  auditEvents AuditEvent[]
+  usageRecords UsageRecord[]
+  costRecords CostRecord[]
+  deployments Deployment[]
+  secrets     Secret[]
+  
+  @@index([slug])
+  @@index([status])
+  @@map("tenants")
+}
+
+/// User - global identity (can belong to multiple tenants via Membership)
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique @db.VarChar(255)
+  passwordHash  String?   @map("password_hash") @db.VarChar(255)
+  name          String?   @db.VarChar(255)
+  avatarUrl     String?   @map("avatar_url") @db.Text
+  emailVerified Boolean   @default(false) @map("email_verified")
+  status        String    @default("active") @db.VarChar(50) // active, inactive, suspended
+  
+  // SSO
+  ssoProvider   String?   @map("sso_provider") @db.VarChar(50)
+  ssoProviderId String?   @map("sso_provider_id") @db.VarChar(255)
+  
+  // Preferences
+  preferredLanguage String @default("en") @map("preferred_language") @db.VarChar(10)
+  timezone          String @default("UTC") @db.VarChar(50)
+  
+  // Audit
+  lastLoginAt   DateTime? @map("last_login_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  deletedAt     DateTime? @map("deleted_at")
+  
+  // Relations
+  memberships   Membership[]
+  sessions      Session[]
+  auditEvents   AuditEvent[]
+  activityLogs  ActivityLog[]
+  
+  @@index([email])
+  @@index([status])
+  @@index([ssoProvider, ssoProviderId])
+  @@map("users")
+}
+
+/// Membership - links User to Tenant with role
+model Membership {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  status    String   @default("active") @db.VarChar(50) // active, invited, suspended
+  invitedBy String?  @map("invited_by") @db.Uuid
+  invitedAt DateTime? @map("invited_at")
+  joinedAt  DateTime? @map("joined_at")
+  
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id])
+  
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// Role - RBAC role within a tenant
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid // null for system roles
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  isSystem    Boolean  @default(false) @map("is_system")
+  isDefault   Boolean  @default(false) @map("is_default")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  memberships Membership[]
+  permissions RolePermission[]
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+/// Permission - atomic permission (resource + action)
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  resource    String   @db.VarChar(100) // application, workflow, user, etc
+  action      String   @db.VarChar(50)  // create, read, update, delete, execute, manage
+  description String?  @db.Text
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  roles RolePermission[]
+  
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+/// RolePermission - many-to-many between Role and Permission
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+  
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Session - user session (JWT refresh tokens, etc)
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  token        String   @unique @db.Text
+  refreshToken String?  @unique @map("refresh_token") @db.Text
+  expiresAt    DateTime @map("expires_at")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent") @db.Text
+  
+  createdAt    DateTime @default(now()) @map("created_at")
+  revokedAt    DateTime? @map("revoked_at")
+  
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ============================================================
+// APPLICATIONS
+// ============================================================
+
+/// Application - business application
+model Application {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  slug        String   @db.VarChar(100)
+  status      String   @default("draft") @db.VarChar(50) // draft, published, archived
+  
+  // Current version
+  currentVersionId String? @map("current_version_id") @db.Uuid
+  
+  // Metadata
+  metadata    Json     @default("{}")
+  settings    Json     @default("{}")
+  tags        String[] @default([])
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  
+  // Relations
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions    ApplicationVersion[]
+  environments Environment[]
+  deployments Deployment[]
+  
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([status])
+  @@map("applications")
+}
+
+/// ApplicationVersion - versioned application snapshot
+model ApplicationVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  version       String   @db.VarChar(50) // semantic version
+  spec          Json     // application specification
+  changelog     String?  @db.Text
+  createdBy     String?  @map("created_by") @db.Uuid
+  isCurrent     Boolean  @default(false) @map("is_current")
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@unique([applicationId, version])
+  @@index([applicationId])
+  @@index([isCurrent])
+  @@map("application_versions")
+}
+
+/// Environment - deployment environment for an application
+model Environment {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  name          String   @db.VarChar(100) // development, staging, production
+  type          String   @db.VarChar(50) // dev, staging, prod
+  url           String?  @db.Text
+  config        Json     @default("{}")
+  variables     Json     @default("{}")
+  isDefault     Boolean  @default(false) @map("is_default")
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@unique([applicationId, name])
+  @@index([applicationId])
+  @@map("environments")
+}
+
+// ============================================================
+// WORKFLOWS
+// ============================================================
+
+/// Workflow - automation workflow
+model Workflow {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  slug        String   @db.VarChar(100)
+  status      String   @default("draft") @db.VarChar(50) // draft, active, paused, archived
+  
+  // Current version
+  currentVersionId String? @map("current_version_id") @db.Uuid
+  
+  // Trigger configuration
+  triggers    Json     @default("[]")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  
+  // Relations
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions   WorkflowVersion[]
+  executions WorkflowExecution[]
+  
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([status])
+  @@map("workflows")
+}
+
+/// WorkflowVersion - versioned workflow definition
+model WorkflowVersion {
+  id          String   @id @default(uuid()) @db.Uuid
+  workflowId  String   @map("workflow_id") @db.Uuid
+  version     String   @db.VarChar(50)
+  definition  Json     // workflow steps, triggers, etc
+  changelog   String?  @db.Text
+  createdBy   String?  @map("created_by") @db.Uuid
+  isCurrent   Boolean  @default(false) @map("is_current")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  @@unique([workflowId, version])
+  @@index([workflowId])
+  @@index([isCurrent])
+  @@map("workflow_versions")
+}
+
+/// WorkflowExecution - single workflow execution instance
+model WorkflowExecution {
+  id           String   @id @default(uuid()) @db.Uuid
+  workflowId   String   @map("workflow_id") @db.Uuid
+  versionId    String?  @map("version_id") @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  status       String   @default("pending") @db.VarChar(50) // pending, running, completed, failed, cancelled
+  
+  // Execution context
+  input        Json     @default("{}")
+  output       Json     @default("{}")
+  variables    Json     @default("{}")
+  
+  // State
+  currentStep  String?  @map("current_step") @db.VarChar(100)
+  stepResults  Json     @default("[]")
+  
+  // Error
+  error        String?  @db.Text
+  
+  // Timing
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  duration     Int?     // milliseconds
+  retryCount   Int      @default(0) @map("retry_count")
+  
+  // Audit
+  triggeredBy  String?  @map("triggered_by") @db.Uuid
+  triggerType  String   @default("manual") @map("trigger_type") @db.VarChar(50)
+  
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  
+  @@index([workflowId])
+  @@index([tenantId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("workflow_executions")
+}
+
+// ============================================================
+// DEPLOYMENTS
+// ============================================================
+
+/// Deployment - application deployment record
+model Deployment {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  applicationId String   @map("application_id") @db.Uuid
+  environmentId String   @map("environment_id") @db.Uuid
+  versionId     String?  @map("version_id") @db.Uuid
+  
+  status        String   @default("pending") @db.VarChar(50) // pending, building, deploying, success, failed, rolled_back
+  platform      String   @db.VarChar(50) // docker, kubernetes, aws, gcp, azure, vercel, netlify
+  
+  // Configuration
+  config        Json     @default("{}")
+  
+  // Logs
+  logs          Json     @default("[]")
+  
+  // Health
+  healthStatus  String?  @map("health_status") @db.VarChar(50)
+  healthChecks  Json     @default("[]")
+  
+  // Timing
+  startedAt     DateTime @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  duration      Int?     // milliseconds
+  
+  // Error
+  error         String?  @db.Text
+  
+  // Triggered by
+  triggeredBy   String?  @map("triggered_by") @db.Uuid
+  
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  @@index([applicationId])
+  @@index([tenantId])
+  @@index([status])
+  @@map("deployments")
+}
+
+// ============================================================
+// SECRETS
+// ============================================================
+
+/// Secret - encrypted secret metadata (actual value in vault)
+model Secret {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  type        String   @db.VarChar(50) // api_key, password, certificate, oauth
+  provider    String?  @db.VarChar(50) // aws_secrets_manager, vault, etc
+  
+  // Reference to actual secret (not the value itself)
+  vaultPath   String?  @map("vault_path") @db.Text
+  
+  // Metadata
+  metadata    Json     @default("{}")
+  
+  // Rotation
+  rotationEnabled Boolean @default(false) @map("rotation_enabled")
+  lastRotatedAt   DateTime? @map("last_rotated_at")
+  nextRotationAt  DateTime? @map("next_rotation_at")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+  
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("secrets")
+}
+
+// ============================================================
+// AUDIT & COMPLIANCE
+// ============================================================
+
+/// AuditEvent - comprehensive audit log
+model AuditEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  
+  // Event details
+  eventType   String   @map("event_type") @db.VarChar(50) // auth, access, modify, delete, create, security, system
+  action      String   @db.VarChar(100)
+  resource    String   @db.VarChar(100)
+  resourceId  String?  @map("resource_id") @db.Uuid
+  
+  // Context
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  userAgent   String?  @map("user_agent") @db.Text
+  sessionId   String?  @map("session_id") @db.Uuid
+  requestId   String?  @map("request_id") @db.VarChar(100)
+  
+  // Details
+  details     Json     @default("{}")
+  status      String   @default("success") @db.VarChar(50) // success, failure, error
+  errorMessage String? @map("error_message") @db.Text
+  
+  // Timing
+  duration    Int?     // milliseconds
+  
+  timestamp   DateTime @default(now())
+  
+  // Relations
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([tenantId, timestamp])
+  @@index([userId, timestamp])
+  @@index([eventType, timestamp])
+  @@index([resource, resourceId])
+  @@map("audit_events")
+}
+
+/// ActivityLog - user activity stream
+model ActivityLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  
+  action      String   @db.VarChar(100)
+  resource    String   @db.VarChar(100)
+  resourceId  String?  @map("resource_id") @db.Uuid
+  details     Json     @default("{}")
+  
+  timestamp   DateTime @default(now())
+  
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId, timestamp])
+  @@index([userId, timestamp])
+  @@map("activity_logs")
+}
+
+// ============================================================
+// USAGE & COST
+// ============================================================
+
+/// UsageRecord - usage tracking for billing
+model UsageRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  
+  service     String   @db.VarChar(50) // openai, anthropic, compute, storage
+  operation   String   @db.VarChar(100) // chat_completion, embedding, etc
+  quantity    Float
+  unit        String   @db.VarChar(50) // tokens, requests, bytes, seconds
+  
+  // Attribution
+  model       String?  @db.VarChar(100)
+  provider    String?  @db.VarChar(50)
+  
+  // Metadata
+  metadata    Json     @default("{}")
+  
+  timestamp   DateTime @default(now())
+  
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  costRecords CostRecord[]
+  
+  @@index([tenantId, timestamp])
+  @@index([service, timestamp])
+  @@map("usage_records")
+}
+
+/// CostRecord - cost calculation
+model CostRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  usageRecordId String?  @map("usage_record_id") @db.Uuid
+  
+  service       String   @db.VarChar(50)
+  description   String   @db.Text
+  
+  quantity      Float
+  unitCost      Float    @map("unit_cost")
+  totalCost     Float    @map("total_cost")
+  currency      String   @default("USD") @db.VarChar(3)
+  
+  // Period
+  periodStart   DateTime @map("period_start")
+  periodEnd     DateTime @map("period_end")
+  
+  timestamp     DateTime @default(now())
+  
+  // Relations
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  usageRecord UsageRecord? @relation(fields: [usageRecordId], references: [id], onDelete: SetNull)
+  
+  @@index([tenantId, timestamp])
+  @@index([periodStart, periodEnd])
+  @@map("cost_records")
+}
+
+// ============================================================
+// MARKETPLACE
+// ============================================================
+
+/// MarketplaceTemplate - shared template
+model MarketplaceTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  authorId    String   @map("author_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  category    String   @db.VarChar(50)
+  version     String   @db.VarChar(50)
+  
+  // Content
+  spec        Json     // application specification
+  preview     Json     @default("{}")
+  
+  // Metadata
+  tags        String[] @default([])
+  license     String   @default("MIT") @db.VarChar(50)
+  price       String   @default("free") @db.VarChar(50)
+  priceAmount Float?   @map("price_amount")
+  
+  // Stats
+  downloads   Int      @default(0)
+  rating      Float    @default(0)
+  reviewCount Int      @default(0) @map("review_count")
+  
+  // Status
+  status      String   @default("published") @db.VarChar(50)
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  reviews     TemplateReview[]
+  
+  @@index([category])
+  @@index([status])
+  @@index([rating])
+  @@map("marketplace_templates")
+}
+
+/// TemplateReview - user review for template
+model TemplateReview {
+  id          String   @id @default(uuid()) @db.Uuid
+  templateId  String   @map("template_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  rating      Int
+  comment     String?  @db.Text
+  helpful     Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  template MarketplaceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  
+  @@unique([templateId, userId])
+  @@index([templateId])
+  @@map("template_reviews")
+}
+
+// ============================================================
+// COMPLIANCE
+// ============================================================
+
+/// ComplianceFramework - compliance framework metadata
+model ComplianceFramework {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100) @unique
+  version     String   @db.VarChar(50)
+  description String?  @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  controls ComplianceControl[]
+  
+  @@map("compliance_frameworks")
+}
+
+/// ComplianceControl - individual control in a framework
+model ComplianceControl {
+  id          String   @id @default(uuid()) @db.Uuid
+  frameworkId String   @map("framework_id") @db.Uuid
+  code        String   @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  framework ComplianceFramework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  evidence  ComplianceEvidence[]
+  
+  @@unique([frameworkId, code])
+  @@map("compliance_controls")
+}
+
+/// ComplianceEvidence - evidence for control compliance
+model ComplianceEvidence {
+  id          String   @id @default(uuid()) @db.Uuid
+  controlId   String   @map("control_id") @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  
+  status      String   @db.VarChar(50) // PASS, FAIL, NOT_ASSESSED
+  type        String   @db.VarChar(50) // document, screenshot, log, config, policy
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  url         String?  @db.Text
+  
+  // Assessment
+  assessedBy  String?  @map("assessed_by") @db.Uuid
+  assessedAt  DateTime? @map("assessed_at")
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  control ComplianceControl @relation(fields: [controlId], references: [id], onDelete: Cascade)
+  
+  @@index([tenantId])
+  @@index([controlId])
+  @@map("compliance_evidence")
+}
