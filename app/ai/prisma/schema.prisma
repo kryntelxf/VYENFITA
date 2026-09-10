@@ -3,16 +3,7 @@
 // ============================================================
 // Production-grade schema for multi-tenant AI-native platform
 // 
-// Design principles:
-// - Multi-tenant by default (tenantId on all business tables)
-// - Soft delete for audit trail
-// - Timestamps for all records
-// - UUIDs for distributed systems
-// - Indexes for query performance
-// - Foreign keys for referential integrity
-// - JSONB for flexible metadata
-// 
-// @version 1.0.0
+// @version 1.0.1
 // ============================================================
 
 generator client {
@@ -35,18 +26,16 @@ model Tenant {
   slug        String   @unique @db.VarChar(63)
   name        String   @db.VarChar(255)
   description String?  @db.Text
-  plan        String   @default("free") @db.VarChar(50) // free, pro, business, enterprise
-  status      String   @default("active") @db.VarChar(50) // active, suspended, deleted
+  plan        String   @default("free") @db.VarChar(50)
+  status      String   @default("active") @db.VarChar(50)
   settings    Json     @default("{}")
   metadata    Json     @default("{}")
   
-  // Audit
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
   
-  // Relations
-  users       User[]
+  // Relations (users are linked via Membership, not directly)
   memberships Membership[]
   applications Application[]
   workflows   Workflow[]
@@ -61,7 +50,7 @@ model Tenant {
   @@map("tenants")
 }
 
-/// User - global identity (can belong to multiple tenants via Membership)
+/// User - global identity (belongs to tenants via Membership)
 model User {
   id            String    @id @default(uuid()) @db.Uuid
   email         String    @unique @db.VarChar(255)
@@ -69,17 +58,14 @@ model User {
   name          String?   @db.VarChar(255)
   avatarUrl     String?   @map("avatar_url") @db.Text
   emailVerified Boolean   @default(false) @map("email_verified")
-  status        String    @default("active") @db.VarChar(50) // active, inactive, suspended
+  status        String    @default("active") @db.VarChar(50)
   
-  // SSO
   ssoProvider   String?   @map("sso_provider") @db.VarChar(50)
   ssoProviderId String?   @map("sso_provider_id") @db.VarChar(255)
   
-  // Preferences
   preferredLanguage String @default("en") @map("preferred_language") @db.VarChar(10)
   timezone          String @default("UTC") @db.VarChar(50)
   
-  // Audit
   lastLoginAt   DateTime? @map("last_login_at")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
@@ -103,7 +89,7 @@ model Membership {
   userId    String   @map("user_id") @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
   roleId    String   @map("role_id") @db.Uuid
-  status    String   @default("active") @db.VarChar(50) // active, invited, suspended
+  status    String   @default("active") @db.VarChar(50)
   invitedBy String?  @map("invited_by") @db.Uuid
   invitedAt DateTime? @map("invited_at")
   joinedAt  DateTime? @map("joined_at")
@@ -126,7 +112,7 @@ model Membership {
 /// Role - RBAC role within a tenant
 model Role {
   id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String?  @map("tenant_id") @db.Uuid // null for system roles
+  tenantId    String?  @map("tenant_id") @db.Uuid
   name        String   @db.VarChar(100)
   description String?  @db.Text
   isSystem    Boolean  @default(false) @map("is_system")
@@ -147,8 +133,8 @@ model Role {
 /// Permission - atomic permission (resource + action)
 model Permission {
   id          String   @id @default(uuid()) @db.Uuid
-  resource    String   @db.VarChar(100) // application, workflow, user, etc
-  action      String   @db.VarChar(50)  // create, read, update, delete, execute, manage
+  resource    String   @db.VarChar(100)
+  action      String   @db.VarChar(50)
   description String?  @db.Text
   
   createdAt   DateTime @default(now()) @map("created_at")
@@ -204,12 +190,10 @@ model Application {
   name        String   @db.VarChar(255)
   description String?  @db.Text
   slug        String   @db.VarChar(100)
-  status      String   @default("draft") @db.VarChar(50) // draft, published, archived
+  status      String   @default("draft") @db.VarChar(50)
   
-  // Current version
   currentVersionId String? @map("current_version_id") @db.Uuid
   
-  // Metadata
   metadata    Json     @default("{}")
   settings    Json     @default("{}")
   tags        String[] @default([])
@@ -234,8 +218,8 @@ model Application {
 model ApplicationVersion {
   id            String   @id @default(uuid()) @db.Uuid
   applicationId String   @map("application_id") @db.Uuid
-  version       String   @db.VarChar(50) // semantic version
-  spec          Json     // application specification
+  version       String   @db.VarChar(50)
+  spec          Json
   changelog     String?  @db.Text
   createdBy     String?  @map("created_by") @db.Uuid
   isCurrent     Boolean  @default(false) @map("is_current")
@@ -255,8 +239,8 @@ model ApplicationVersion {
 model Environment {
   id            String   @id @default(uuid()) @db.Uuid
   applicationId String   @map("application_id") @db.Uuid
-  name          String   @db.VarChar(100) // development, staging, production
-  type          String   @db.VarChar(50) // dev, staging, prod
+  name          String   @db.VarChar(100)
+  type          String   @db.VarChar(50)
   url           String?  @db.Text
   config        Json     @default("{}")
   variables     Json     @default("{}")
@@ -284,12 +268,10 @@ model Workflow {
   name        String   @db.VarChar(255)
   description String?  @db.Text
   slug        String   @db.VarChar(100)
-  status      String   @default("draft") @db.VarChar(50) // draft, active, paused, archived
+  status      String   @default("draft") @db.VarChar(50)
   
-  // Current version
   currentVersionId String? @map("current_version_id") @db.Uuid
   
-  // Trigger configuration
   triggers    Json     @default("[]")
   
   createdAt   DateTime @default(now()) @map("created_at")
@@ -312,7 +294,7 @@ model WorkflowVersion {
   id          String   @id @default(uuid()) @db.Uuid
   workflowId  String   @map("workflow_id") @db.Uuid
   version     String   @db.VarChar(50)
-  definition  Json     // workflow steps, triggers, etc
+  definition  Json
   changelog   String?  @db.Text
   createdBy   String?  @map("created_by") @db.Uuid
   isCurrent   Boolean  @default(false) @map("is_current")
@@ -334,27 +316,22 @@ model WorkflowExecution {
   workflowId   String   @map("workflow_id") @db.Uuid
   versionId    String?  @map("version_id") @db.Uuid
   tenantId     String   @map("tenant_id") @db.Uuid
-  status       String   @default("pending") @db.VarChar(50) // pending, running, completed, failed, cancelled
+  status       String   @default("pending") @db.VarChar(50)
   
-  // Execution context
   input        Json     @default("{}")
   output       Json     @default("{}")
   variables    Json     @default("{}")
   
-  // State
   currentStep  String?  @map("current_step") @db.VarChar(100)
   stepResults  Json     @default("[]")
   
-  // Error
   error        String?  @db.Text
   
-  // Timing
   startedAt    DateTime? @map("started_at")
   completedAt  DateTime? @map("completed_at")
-  duration     Int?     // milliseconds
+  duration     Int?
   retryCount   Int      @default(0) @map("retry_count")
   
-  // Audit
   triggeredBy  String?  @map("triggered_by") @db.Uuid
   triggerType  String   @default("manual") @map("trigger_type") @db.VarChar(50)
   
@@ -383,28 +360,21 @@ model Deployment {
   environmentId String   @map("environment_id") @db.Uuid
   versionId     String?  @map("version_id") @db.Uuid
   
-  status        String   @default("pending") @db.VarChar(50) // pending, building, deploying, success, failed, rolled_back
-  platform      String   @db.VarChar(50) // docker, kubernetes, aws, gcp, azure, vercel, netlify
+  status        String   @default("pending") @db.VarChar(50)
+  platform      String   @db.VarChar(50)
   
-  // Configuration
   config        Json     @default("{}")
-  
-  // Logs
   logs          Json     @default("[]")
   
-  // Health
   healthStatus  String?  @map("health_status") @db.VarChar(50)
   healthChecks  Json     @default("[]")
   
-  // Timing
   startedAt     DateTime @default(now()) @map("started_at")
   completedAt   DateTime? @map("completed_at")
-  duration      Int?     // milliseconds
+  duration      Int?
   
-  // Error
   error         String?  @db.Text
   
-  // Triggered by
   triggeredBy   String?  @map("triggered_by") @db.Uuid
   
   createdAt     DateTime @default(now()) @map("created_at")
@@ -424,22 +394,18 @@ model Deployment {
 // SECRETS
 // ============================================================
 
-/// Secret - encrypted secret metadata (actual value in vault)
+/// Secret - encrypted secret metadata (value stored in vault)
 model Secret {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   name        String   @db.VarChar(255)
   description String?  @db.Text
-  type        String   @db.VarChar(50) // api_key, password, certificate, oauth
-  provider    String?  @db.VarChar(50) // aws_secrets_manager, vault, etc
+  type        String   @db.VarChar(50)
+  provider    String?  @db.VarChar(50)
   
-  // Reference to actual secret (not the value itself)
   vaultPath   String?  @map("vault_path") @db.Text
-  
-  // Metadata
   metadata    Json     @default("{}")
   
-  // Rotation
   rotationEnabled Boolean @default(false) @map("rotation_enabled")
   lastRotatedAt   DateTime? @map("last_rotated_at")
   nextRotationAt  DateTime? @map("next_rotation_at")
@@ -466,25 +432,21 @@ model AuditEvent {
   tenantId    String?  @map("tenant_id") @db.Uuid
   userId      String?  @map("user_id") @db.Uuid
   
-  // Event details
-  eventType   String   @map("event_type") @db.VarChar(50) // auth, access, modify, delete, create, security, system
+  eventType   String   @map("event_type") @db.VarChar(50)
   action      String   @db.VarChar(100)
   resource    String   @db.VarChar(100)
   resourceId  String?  @map("resource_id") @db.Uuid
   
-  // Context
   ipAddress   String?  @map("ip_address") @db.VarChar(45)
   userAgent   String?  @map("user_agent") @db.Text
   sessionId   String?  @map("session_id") @db.Uuid
   requestId   String?  @map("request_id") @db.VarChar(100)
   
-  // Details
   details     Json     @default("{}")
-  status      String   @default("success") @db.VarChar(50) // success, failure, error
+  status      String   @default("success") @db.VarChar(50)
   errorMessage String? @map("error_message") @db.Text
   
-  // Timing
-  duration    Int?     // milliseconds
+  duration    Int?
   
   timestamp   DateTime @default(now())
   
@@ -530,16 +492,14 @@ model UsageRecord {
   tenantId    String   @map("tenant_id") @db.Uuid
   userId      String?  @map("user_id") @db.Uuid
   
-  service     String   @db.VarChar(50) // openai, anthropic, compute, storage
-  operation   String   @db.VarChar(100) // chat_completion, embedding, etc
+  service     String   @db.VarChar(50)
+  operation   String   @db.VarChar(100)
   quantity    Float
-  unit        String   @db.VarChar(50) // tokens, requests, bytes, seconds
+  unit        String   @db.VarChar(50)
   
-  // Attribution
   model       String?  @db.VarChar(100)
   provider    String?  @db.VarChar(50)
   
-  // Metadata
   metadata    Json     @default("{}")
   
   timestamp   DateTime @default(now())
@@ -567,7 +527,6 @@ model CostRecord {
   totalCost     Float    @map("total_cost")
   currency      String   @default("USD") @db.VarChar(3)
   
-  // Period
   periodStart   DateTime @map("period_start")
   periodEnd     DateTime @map("period_end")
   
@@ -595,22 +554,18 @@ model MarketplaceTemplate {
   category    String   @db.VarChar(50)
   version     String   @db.VarChar(50)
   
-  // Content
-  spec        Json     // application specification
+  spec        Json
   preview     Json     @default("{}")
   
-  // Metadata
   tags        String[] @default([])
   license     String   @default("MIT") @db.VarChar(50)
   price       String   @default("free") @db.VarChar(50)
   priceAmount Float?   @map("price_amount")
   
-  // Stats
   downloads   Int      @default(0)
   rating      Float    @default(0)
   reviewCount Int      @default(0) @map("review_count")
   
-  // Status
   status      String   @default("published") @db.VarChar(50)
   
   createdAt   DateTime @default(now()) @map("created_at")
@@ -687,13 +642,12 @@ model ComplianceEvidence {
   controlId   String   @map("control_id") @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   
-  status      String   @db.VarChar(50) // PASS, FAIL, NOT_ASSESSED
-  type        String   @db.VarChar(50) // document, screenshot, log, config, policy
+  status      String   @db.VarChar(50)
+  type        String   @db.VarChar(50)
   name        String   @db.VarChar(255)
   description String?  @db.Text
   url         String?  @db.Text
   
-  // Assessment
   assessedBy  String?  @map("assessed_by") @db.Uuid
   assessedAt  DateTime? @map("assessed_at")
   
