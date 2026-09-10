@@ -9,18 +9,21 @@
 import { PrismaClient } from '@prisma/client';
 
 // Use separate test database
-const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 if (!TEST_DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL or DATABASE_URL must be set for tests');
 }
 
-// Override for Prisma
 process.env.DATABASE_URL = TEST_DATABASE_URL;
 process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-at-least-32-characters-long';
+process.env.JWT_SECRET =
+  process.env.JWT_SECRET || 'test-secret-key-at-least-32-characters-long';
 
-export const prisma = new PrismaClient();
+export const prisma = new PrismaClient({
+  log: ['error'],
+});
 
 /**
  * Cleanup test database
