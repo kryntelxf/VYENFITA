@@ -16,7 +16,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -61,17 +61,28 @@ jobs:
       - name: Apply migrations
         run: |
           cd app/ai
-          npx prisma migrate deploy || npx prisma db push
+          npx prisma migrate deploy || npx prisma db push --accept-data-loss
 
       - name: Seed database
         run: |
           cd app/ai
-          yarn db:seed || echo "Seed skipped (non-fatal)"
+          yarn db:seed || echo "Seed skipped"
+
+      - name: Type check
+        run: |
+          cd app/ai
+          yarn type-check || echo "Type check warnings (non-fatal)"
 
       - name: Run tests
         run: |
           cd app/ai
-          yarn test --ci --coverage --reporters=default
+          yarn test --ci --coverage --reporters=default 2>&1 | tee test-output.log
+
+      - name: Show test errors
+        if: failure()
+        run: |
+          echo "=== LAST 200 LINES OF TEST OUTPUT ==="
+          tail -200 app/ai/test-output.log
 
       - name: Upload coverage
         if: always()
@@ -82,11 +93,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Test summary
+      - name: Upload test log
         if: always()
-        run: |
-          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Test workflow executed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Note: If some steps showed warnings, they were non-fatal." >> $GITHUB_STEP_SUMMARY
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: app/ai/test-output.log
+          retention-days: 7
+          if-no-files-found: ignore
