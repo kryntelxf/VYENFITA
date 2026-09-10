@@ -1,235 +1,167 @@
 /**
  * VYENFITA Workflow Controller
- * API endpoints for workflow management and execution
+ * 
+ * Real CRUD endpoints for workflows
+ * 
+ * @version 1.0.0
  */
 
 import { Request, Response } from 'express';
-import { AIService } from '../core/services/ai.service';
-import { WorkflowEngine } from '../core/engine/workflow-engine';
-import winston from 'winston';
-
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  transports: [new winston.transports.Console({ format: winston.format.simple() })],
-});
-
-const workflowEngine = new WorkflowEngine(logger);
+import { WorkflowService } from '../lib/workflow/workflow.service';
 
 export class WorkflowController {
-  private aiService: AIService;
-
-  constructor() {
-    this.aiService = new AIService();
-  }
-
   /**
-   * Execute a workflow
+   * Create workflow
+   * POST /api/v1/workflows
    */
-  async executeWorkflow(req: Request, res: Response): Promise<void> {
+  async create(req: Request, res: Response): Promise<void> {
     try {
-      const { workflow, variables, triggerData } = req.body;
-      const tenantId = req.headers['x-tenant-id'] as string || 'default';
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
+        return;
+      }
 
-      if (!workflow) {
+      const { name, description, slug, definition, triggers } = req.body;
+
+      if (!name || !definition) {
         res.status(400).json({
           success: false,
-          error: 'workflow is required',
+          error: 'name and definition are required',
         });
         return;
       }
 
-      const result = await workflowEngine.startExecution(workflow, {
-        tenantId,
-        variables: variables || {},
-        triggerData: triggerData || {},
+      const workflow = await WorkflowService.create({
+        tenantId: req.user.tenantId,
+        userId: req.user.userId,
+        name,
+        description,
+        slug,
+        definition,
+        triggers,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
       });
 
-      res.json({
+      res.status(201).json({
         success: true,
-        data: {
-          executionId: result.id,
-          status: result.status,
-          startedAt: result.startedAt,
-          steps: result.steps,
-        },
+        data: workflow,
       });
     } catch (error) {
-      res.status(500).json({
+      const message = error instanceof Error ? error.message : 'Failed';
+      const isUserError = message.includes('already exists') || message.includes('must be');
+      res.status(isUserError ? 400 : 500).json({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: isUserError ? message : 'Failed to create workflow',
       });
     }
   }
 
   /**
-   * Get execution status
+   * List workflows
+   * GET /api/v1/workflows
    */
-  async getExecution(req: Request, res: Response): Promise<void> {
+  async list(req: Request, res: Response): Promise<void> {
     try {
-      const { executionId } = req.params;
-
-      const execution = workflowEngine.getExecution(executionId);
-      if (!execution) {
-        res.status(404).json({
-          success: false,
-          error: 'Execution not found',
-        });
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
         return;
       }
 
+      const { status, page, limit } = req.query;
+
+      const result = await WorkflowService.list(req.user.tenantId, {
+        status: status as string,
+        page: page ? parseInt(page as string, 10) : undefined,
+        limit: limit ? parseInt(limit as string, 10) : undefined,
+      });
+
       res.json({
         success: true,
-        data: execution,
+        ...result,
       });
     } catch (error) {
-      res.status(500).json({
+      res.status(500).json({ success: false, error: 'Failed to list workflows' });
+    }
+  }
+
+  /**
+   * Get workflow
+   * GET /api/v1/workflows/:id
+   */
+  async get(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
+        return;
+      }
+
+      const workflow = await WorkflowService.getById(req.user.tenantId, req.params.id);
+
+      res.json({
+        success: true,
+        data: workflow,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed';
+      res.status(message.includes('not found') ? 404 : 500).json({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message.includes('not found') ? 'Workflow not found' : 'Failed to get workflow',
       });
     }
   }
 
   /**
-   * List executions for a workflow
+   * Delete workflow
+   * DELETE /api/v1/workflows/:id
    */
-  async listExecutions(req: Request, res: Response): Promise<void> {
+  async delete(req: Request, res: Response): Promise<void> {
     try {
-      const { workflowId } = req.params;
-
-      if (!workflowId) {
-        res.status(400).json({
-          success: false,
-          error: 'workflowId is required',
-        });
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
         return;
       }
 
-      const executions = workflowEngine.getExecutions(workflowId);
+      await WorkflowService.delete(
+        req.user.tenantId,
+        req.params.id,
+        req.user.userId,
+        req.ip,
+        req.headers['user-agent']
+      );
+
       res.json({
         success: true,
-        data: executions,
-        count: executions.length,
+        message: 'Workflow deleted successfully',
       });
     } catch (error) {
-      res.status(500).json({
+      const message = error instanceof Error ? error.message : 'Failed';
+      res.status(message.includes('not found') ? 404 : 500).json({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message.includes('not found') ? 'Workflow not found' : 'Failed to delete workflow',
       });
     }
   }
 
   /**
-   * Generate workflow from description and execute immediately
+   * Get workflow statistics
+   * GET /api/v1/workflows/stats
    */
-  async generateAndExecute(req: Request, res: Response): Promise<void> {
+  async stats(req: Request, res: Response): Promise<void> {
     try {
-      const { description, variables, triggerData } = req.body;
-      const tenantId = req.headers['x-tenant-id'] as string || 'default';
-
-      if (!description) {
-        res.status(400).json({
-          success: false,
-          error: 'description is required',
-        });
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'Not authenticated' });
         return;
       }
 
-      // Generate workflow using AI
-      const messages = [
-        { role: 'system', content: this.getWorkflowSystemPrompt() },
-        { role: 'user', content: description },
-      ];
-
-      const response = await this.aiService.chat({
-        messages,
-        temperature: 0.5,
-        maxTokens: 4096,
-      });
-
-      const workflow = JSON.parse(response.choices[0].message.content);
-
-      // Execute the generated workflow
-      const result = await workflowEngine.startExecution(workflow, {
-        tenantId,
-        variables: variables || {},
-        triggerData: triggerData || {},
-      });
+      const stats = await WorkflowService.getStats(req.user.tenantId);
 
       res.json({
         success: true,
-        data: {
-          workflow,
-          execution: {
-            id: result.id,
-            status: result.status,
-            startedAt: result.startedAt,
-            steps: result.steps,
-          },
-        },
+        data: stats,
       });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      res.status(500).json({ success: false, error: 'Failed to get statistics' });
     }
   }
-
-  private getWorkflowSystemPrompt(): string {
-    return `You are VYENFITA, an expert in business process automation and workflow design.
-
-Generate automation workflows based on user descriptions. Your workflows must be reliable, scalable, and follow best practices.
-
-Your response must be a valid JSON object with this exact structure:
-{
-  "id": "wf-1",
-  "name": "Workflow Name",
-  "description": "Workflow description",
-  "version": "1.0.0",
-  "triggers": [
-    {
-      "id": "trigger-1",
-      "type": "schedule|event|webhook|manual|api",
-      "config": {
-        "schedule": "0 9 * * 1",
-        "event": "user.created",
-        "webhook": "/webhook/path"
-      }
-    }
-  ],
-  "steps": [
-    {
-      "id": "step-1",
-      "name": "Step Name",
-      "type": "action|condition|loop|wait|parallel|subflow|notification",
-      "action": "send_email|update_database|call_api|notify|transform|filter|aggregate|approval|webhook",
-      "config": {
-        "from": "sender@example.com",
-        "to": "recipient@example.com",
-        "subject": "Email Subject",
-        "body": "Email body content"
-      },
-      "conditions": [
-        {
-          "field": "data.field",
-          "operator": "equals|not_equals|greater_than|less_than|contains|starts_with|ends_with|is_true|is_false|is_null",
-          "value": "expected value"
         }
-      ],
-      "onError": "continue|stop|retry|notify",
-      "retryConfig": {
-        "maxAttempts": 3,
-        "delayMs": 5000
-      }
-    }
-  ],
-  "errorHandling": {
-    "retryCount": 3,
-    "retryDelay": 5000,
-    "notifyOnError": true,
-    "notifyTo": ["admin@example.com"]
-  }
-}`;
-  }
-      }
