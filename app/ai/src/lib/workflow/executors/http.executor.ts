@@ -1,13 +1,18 @@
 /**
  * VYENFITA HTTP Step Executor
  * 
- * Executes HTTP request steps
+ * Executes HTTP request steps WITH SSRF protection
  * 
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 import axios, { AxiosRequestConfig } from 'axios';
 import { StepExecutor, StepContext, StepResult, interpolateObject } from './executor.interface';
+import { SSRFGuard } from '../../security/ssrf-guard';
+import { auditService } from '../../audit/audit.service';
+import { logger } from '../../observability/logger';
+
+const MAX_RESPONSE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export class HttpExecutor implements StepExecutor {
   readonly type = 'http';
@@ -22,17 +27,7 @@ export class HttpExecutor implements StepExecutor {
         steps: context.stepOutputs,
       });
 
-      const requestConfig: AxiosRequestConfig = {
-        method: config.method || 'GET',
-        url: config.url,
-        headers: config.headers || {},
-        params: config.params,
-        data: config.body,
-        timeout: config.timeout || 30000,
-        validateStatus: () => true, // We handle status ourselves
-      };
-
-      if (!requestConfig.url) {
+      if (!config.url) {
         return {
           success: false,
           error: 'URL is required',
@@ -40,17 +35,58 @@ export class HttpExecutor implements StepExecutor {
         };
       }
 
+      // SSRF Protection
+      const ssrfCheck = await SSRFGuard.check(config.url);
+      if (!ssrfCheck.safe) {
+        await auditService.log({
+          tenantId: context.tenantId,
+          userId: context.userId,
+          eventType: 'security',
+          action: 'ssrf_blocked',
+          resource: 'workflow_step',
+          resourceId: context.stepId,
+          details: {
+            url: config.url,
+            reason: ssrfCheck.reason,
+          },
+          status: 'failure',
+        });
+
+        logger.warn('SSRF blocked', {
+          url: config.url,
+          reason: ssrfCheck.reason,
+          stepId: context.stepId,
+        });
+
+        return {
+          success: false,
+          error: `SSRF protection: ${ssrfCheck.reason}`,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      const requestConfig: AxiosRequestConfig = {
+        method: config.method || 'GET',
+        url: config.url,
+        headers: config.headers || {},
+        params: config.params,
+        data: config.body,
+        timeout: Math.min(config.timeout || 30000, 60000),
+        maxContentLength: MAX_RESPONSE_BYTES,
+        maxBodyLength: MAX_RESPONSE_BYTES,
+        validateStatus: () => true,
+        // Prevent redirect to internal IPs
+        maxRedirects: 3,
+      };
+
       const response = await axios(requestConfig);
       const durationMs = Date.now() - startTime;
-
-      // Consider 2xx as success
       const success = response.status >= 200 && response.status < 300;
 
       return {
         success,
         output: {
           status: response.status,
-          headers: response.headers,
           data: response.data,
         },
         error: success ? undefined : `HTTP ${response.status}`,
@@ -79,4 +115,4 @@ export class HttpExecutor implements StepExecutor {
 
     return { valid: errors.length === 0, errors };
   }
-  }
+          }
