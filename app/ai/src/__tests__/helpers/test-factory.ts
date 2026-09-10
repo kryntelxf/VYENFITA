@@ -1,8 +1,6 @@
 /**
  * VYENFITA Test Data Factory
  * 
- * Creates test fixtures for users, tenants, applications, etc.
- * 
  * @version 1.0.0
  */
 
@@ -24,7 +22,7 @@ export interface TestTenant {
 export async function createTestTenant(
   suffix: string = Math.random().toString(36).substring(7)
 ): Promise<TestTenant> {
-  const email = `owner-${suffix}@test.com`;
+  const email = `owner-${suffix}-${Date.now()}@test.com`;
   const password = 'Test1234';
 
   const result = await AuthService.register({
@@ -55,10 +53,9 @@ export async function createTestUserInTenant(
   roleName: 'Editor' | 'Viewer' | 'Admin' = 'Editor'
 ): Promise<{ userId: string; email: string; password: string }> {
   const suffix = Math.random().toString(36).substring(7);
-  const email = `user-${suffix}@test.com`;
+  const email = `user-${suffix}-${Date.now()}@test.com`;
   const password = 'Test1234';
 
-  // Find role
   const role = await prisma.role.findFirst({
     where: { tenantId, name: roleName },
   });
@@ -67,6 +64,7 @@ export async function createTestUserInTenant(
     throw new Error(`Role ${roleName} not found in tenant ${tenantId}`);
   }
 
+  // Dynamic import to avoid circular dependency
   const { TenantService } = await import('../../lib/tenant/tenant.service');
 
   const result = await TenantService.inviteMember({
@@ -87,7 +85,9 @@ export async function createTestApplication(
   userId: string,
   name: string = 'Test Application'
 ): Promise<{ applicationId: string; slug: string }> {
-  const { ApplicationService } = await import('../../lib/application/application.service');
+  const { ApplicationService } = await import(
+    '../../lib/application/application.service'
+  );
 
   const app = await ApplicationService.create({
     tenantId,
