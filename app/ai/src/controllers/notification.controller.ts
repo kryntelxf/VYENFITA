@@ -89,7 +89,7 @@ export class NotificationController {
    * Get all notifications
    * GET /api/v1/notifications
    */
-  async getAll(req: Request, res: Response): Promise<void> {
+  async getAll(_req: Request, res: Response): Promise<void> {
     try {
       const result = notificationService.getAll();
 
@@ -107,4 +107,4 @@ export class NotificationController {
       });
     }
   }
-          }
+  }
