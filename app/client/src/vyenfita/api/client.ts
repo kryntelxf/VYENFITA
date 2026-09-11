@@ -10,12 +10,24 @@
  * @version 1.0.0
  */
 
+import { getVYENFITAApiUrl, VYENFITA_STORAGE_KEYS } from '../constants';
+
+// ============================================================
+// TYPES
+// ============================================================
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   details?: any;
   meta?: Record<string, any>;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface AuthTokens {
@@ -74,6 +86,29 @@ export interface Workflow {
   updatedAt: string;
 }
 
+export interface ApplicationVersion {
+  id: string;
+  applicationId: string;
+  version: string;
+  spec: any;
+  changelog?: string;
+  isCurrent: boolean;
+  createdAt: string;
+}
+
+export interface WorkflowExecution {
+  id: string;
+  workflowId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  input: any;
+  output: any;
+  error?: string;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
 // ============================================================
 // ERROR TYPES
 // ============================================================
@@ -91,17 +126,18 @@ export class ApiError extends Error {
 }
 
 // ============================================================
-// API CLIENT
+// CONFIGURATION
 // ============================================================
 
-const API_BASE_URL =
-  (window as any).VYENFITA_API_URL ||
-  process.env.REACT_APP_VYENFITA_API_URL ||
-  'http://localhost:3001';
+const API_BASE_URL = getVYENFITAApiUrl();
 
-const ACCESS_TOKEN_KEY = 'vyenfita.accessToken';
-const REFRESH_TOKEN_KEY = 'vyenfita.refreshToken';
-const TENANT_ID_KEY = 'vyenfita.tenantId';
+const ACCESS_TOKEN_KEY = VYENFITA_STORAGE_KEYS.ACCESS_TOKEN;
+const REFRESH_TOKEN_KEY = VYENFITA_STORAGE_KEYS.REFRESH_TOKEN;
+const TENANT_ID_KEY = VYENFITA_STORAGE_KEYS.TENANT_ID;
+
+// ============================================================
+// API CLIENT
+// ============================================================
 
 export class ApiClient {
   private static refreshPromise: Promise<AuthTokens> | null = null;
@@ -111,27 +147,47 @@ export class ApiClient {
   // ============================================================
 
   static getAccessToken(): string | null {
-    return localStorage.getItem(ACCESS_TOKEN_KEY);
+    try {
+      return localStorage.getItem(ACCESS_TOKEN_KEY);
+    } catch {
+      return null;
+    }
   }
 
   static getRefreshToken(): string | null {
-    return localStorage.getItem(REFRESH_TOKEN_KEY);
+    try {
+      return localStorage.getItem(REFRESH_TOKEN_KEY);
+    } catch {
+      return null;
+    }
   }
 
   static getTenantId(): string | null {
-    return localStorage.getItem(TENANT_ID_KEY);
+    try {
+      return localStorage.getItem(TENANT_ID_KEY);
+    } catch {
+      return null;
+    }
   }
 
   static setTokens(tokens: AuthTokens, tenantId: string): void {
-    localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
-    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
-    localStorage.setItem(TENANT_ID_KEY, tenantId);
+    try {
+      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
+      localStorage.setItem(TENANT_ID_KEY, tenantId);
+    } catch (error) {
+      console.error('[VYENFITA] Failed to store tokens:', error);
+    }
   }
 
   static clearTokens(): void {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    localStorage.removeItem(TENANT_ID_KEY);
+    try {
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      localStorage.removeItem(TENANT_ID_KEY);
+    } catch (error) {
+      console.error('[VYENFITA] Failed to clear tokens:', error);
+    }
   }
 
   static isAuthenticated(): boolean {
@@ -187,20 +243,24 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${API_BASE_URL}${path}`;
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(options?.headers || {}),
+      ...((options?.headers as Record<string, string>) || {}),
     };
 
     const accessToken = this.getAccessToken();
     if (accessToken) {
-      (headers as any)['Authorization'] = `Bearer ${accessToken}`;
+      headers['Authorization'] = `Bearer ${accessToken}`;
     }
 
     const tenantId = this.getTenantId();
     if (tenantId) {
-      (headers as any)['X-Tenant-Id'] = tenantId;
+      headers['X-Tenant-Id'] = tenantId;
     }
+
+    // Generate trace ID for correlation
+    const traceId = `fe-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    headers['X-Trace-Id'] = traceId;
 
     let response: Response;
     try {
@@ -214,7 +274,8 @@ export class ApiClient {
       throw new ApiError(
         'Network error: unable to reach server',
         0,
-        'NETWORK_ERROR'
+        'NETWORK_ERROR',
+        { originalError: error instanceof Error ? error.message : String(error) }
       );
     }
 
@@ -360,6 +421,19 @@ export class ApiClient {
     return response.data;
   }
 
+  static async changePassword(params: {
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<void> {
+    const response = await this.post<ApiResponse<any>>(
+      '/api/v1/auth/change-password',
+      params
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Password change failed', 400);
+    }
+  }
+
   // ============================================================
   // TENANT API
   // ============================================================
@@ -372,9 +446,33 @@ export class ApiClient {
     return response.data;
   }
 
-  static async getTenantStats(): Promise<any> {
+  static async updateTenant(params: {
+    name?: string;
+    description?: string;
+    settings?: Record<string, any>;
+  }): Promise<Tenant> {
+    const response = await this.put<ApiResponse<Tenant>>('/api/v1/tenant', params);
+    if (!response.success || !response.data) {
+      throw new ApiError(response.error || 'Update failed', 400);
+    }
+    return response.data;
+  }
+
+  static async getTenantStats(): Promise<{
+    members: number;
+    applications: number;
+    workflows: number;
+    auditEvents: number;
+  }> {
     const response = await this.get<ApiResponse<any>>('/api/v1/tenant/stats');
-    return response.data || {};
+    return (
+      response.data || {
+        members: 0,
+        applications: 0,
+        workflows: 0,
+        auditEvents: 0,
+      }
+    );
   }
 
   static async listMembers(): Promise<any[]> {
@@ -387,6 +485,13 @@ export class ApiClient {
     return response.data || [];
   }
 
+  static async listPermissions(): Promise<any[]> {
+    const response = await this.get<ApiResponse<any[]>>(
+      '/api/v1/tenant/permissions'
+    );
+    return response.data || [];
+  }
+
   static async inviteMember(email: string, roleId: string): Promise<any> {
     const response = await this.post<ApiResponse<any>>(
       '/api/v1/tenant/members/invite',
@@ -396,6 +501,50 @@ export class ApiClient {
       throw new ApiError(response.error || 'Invite failed', 400);
     }
     return response.data;
+  }
+
+  static async updateMemberRole(userId: string, roleId: string): Promise<any> {
+    const response = await this.put<ApiResponse<any>>(
+      `/api/v1/tenant/members/${userId}/role`,
+      { roleId }
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Update role failed', 400);
+    }
+    return response.data;
+  }
+
+  static async removeMember(userId: string): Promise<void> {
+    const response = await this.delete<ApiResponse<any>>(
+      `/api/v1/tenant/members/${userId}`
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Remove failed', 400);
+    }
+  }
+
+  static async createRole(params: {
+    name: string;
+    description?: string;
+    permissions: string[];
+  }): Promise<any> {
+    const response = await this.post<ApiResponse<any>>(
+      '/api/v1/tenant/roles',
+      params
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Create role failed', 400);
+    }
+    return response.data;
+  }
+
+  static async deleteRole(roleId: string): Promise<void> {
+    const response = await this.delete<ApiResponse<any>>(
+      `/api/v1/tenant/roles/${roleId}`
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Delete role failed', 400);
+    }
   }
 
   // ============================================================
@@ -412,10 +561,20 @@ export class ApiClient {
     if (params?.page) query.append('page', String(params.page));
     if (params?.limit) query.append('limit', String(params.limit));
 
+    const qs = query.toString();
     const response = await this.get<any>(
-      `/api/v1/applications?${query.toString()}`
+      `/api/v1/applications${qs ? `?${qs}` : ''}`
     );
-    return { data: response.data || [], pagination: response.pagination };
+
+    return {
+      data: response.data || [],
+      pagination: response.pagination || {
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      },
+    };
   }
 
   static async getApplication(id: string): Promise<Application> {
@@ -431,6 +590,7 @@ export class ApiClient {
   static async createApplication(params: {
     name: string;
     description?: string;
+    slug?: string;
     spec: any;
     tags?: string[];
   }): Promise<Application> {
@@ -474,17 +634,30 @@ export class ApiClient {
     }
   }
 
-  static async getApplicationVersions(id: string): Promise<any[]> {
-    const response = await this.get<ApiResponse<any[]>>(
+  static async getApplicationVersions(id: string): Promise<ApplicationVersion[]> {
+    const response = await this.get<ApiResponse<ApplicationVersion[]>>(
       `/api/v1/applications/${id}/versions`
     );
     return response.data || [];
   }
 
-  static async generateApplication(description: string): Promise<any> {
+  static async rollbackApplication(id: string, versionId: string): Promise<any> {
+    const response = await this.post<ApiResponse<any>>(
+      `/api/v1/applications/${id}/rollback/${versionId}`
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Rollback failed', 400);
+    }
+    return response.data;
+  }
+
+  static async generateApplication(params: {
+    description: string;
+    context?: Record<string, any>;
+  }): Promise<any> {
     const response = await this.post<ApiResponse<any>>(
       '/api/v1/ai/generate-application',
-      { description }
+      params
     );
     if (!response.success || !response.data) {
       throw new ApiError(response.error || 'Generation failed', 400);
@@ -506,10 +679,20 @@ export class ApiClient {
     if (params?.page) query.append('page', String(params.page));
     if (params?.limit) query.append('limit', String(params.limit));
 
+    const qs = query.toString();
     const response = await this.get<any>(
-      `/api/v1/workflows?${query.toString()}`
+      `/api/v1/workflows${qs ? `?${qs}` : ''}`
     );
-    return { data: response.data || [], pagination: response.pagination };
+
+    return {
+      data: response.data || [],
+      pagination: response.pagination || {
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      },
+    };
   }
 
   static async getWorkflow(id: string): Promise<Workflow> {
@@ -525,7 +708,9 @@ export class ApiClient {
   static async createWorkflow(params: {
     name: string;
     description?: string;
+    slug?: string;
     definition: any;
+    triggers?: any[];
   }): Promise<Workflow> {
     const response = await this.post<ApiResponse<Workflow>>(
       '/api/v1/workflows',
@@ -538,25 +723,162 @@ export class ApiClient {
   }
 
   static async deleteWorkflow(id: string): Promise<void> {
-    const response = await this.delete<ApiResponse<any>>(
-      `/api/v1/workflows/${id}`
-    );
+    const response = await this.delete<ApiResponse<any>>(`/api/v1/workflows/${id}`);
     if (!response.success) {
       throw new ApiError(response.error || 'Delete failed', 400);
     }
   }
 
-  static async executeWorkflow(id: string, input?: any): Promise<any> {
-    const response = await this.post<ApiResponse<any>>(
+  static async executeWorkflow(
+    id: string,
+    params?: { input?: any; variables?: any }
+  ): Promise<ApiResponse<any>> {
+    return this.post<ApiResponse<any>>(
       `/api/v1/workflows/${id}/execute`,
-      { input }
+      params || {}
     );
-    return response;
   }
 
-  static async listWorkflowExecutions(id: string): Promise<any> {
-    const response = await this.get<any>(`/api/v1/workflows/${id}/executions`);
-    return response;
+  static async listWorkflowExecutions(
+    id: string,
+    params?: { page?: number; limit?: number }
+  ): Promise<ApiResponse<WorkflowExecution[]>> {
+    const query = new URLSearchParams();
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.limit) query.append('limit', String(params.limit));
+
+    const qs = query.toString();
+    return this.get<ApiResponse<WorkflowExecution[]>>(
+      `/api/v1/workflows/${id}/executions${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  static async getWorkflowExecution(
+    executionId: string
+  ): Promise<WorkflowExecution> {
+    const response = await this.get<ApiResponse<WorkflowExecution>>(
+      `/api/v1/workflows/executions/${executionId}`
+    );
+    if (!response.success || !response.data) {
+      throw new ApiError('Execution not found', 404);
+    }
+    return response.data;
+  }
+
+  static async cancelWorkflowExecution(executionId: string): Promise<void> {
+    const response = await this.post<ApiResponse<any>>(
+      `/api/v1/workflows/executions/${executionId}/cancel`
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Cancel failed', 400);
+    }
+  }
+
+  // ============================================================
+  // DEPLOYMENT API
+  // ============================================================
+
+  static async listDeployments(
+    applicationId: string,
+    params?: { environmentId?: string; status?: string; page?: number; limit?: number }
+  ): Promise<{ data: any[]; pagination: any }> {
+    const query = new URLSearchParams();
+    if (params?.environmentId) query.append('environmentId', params.environmentId);
+    if (params?.status) query.append('status', params.status);
+    if (params?.page) query.append('page', String(params.page));
+    if (params?.limit) query.append('limit', String(params.limit));
+
+    const qs = query.toString();
+    const response = await this.get<any>(
+      `/api/v1/deployments/applications/${applicationId}/deployments${
+        qs ? `?${qs}` : ''
+      }`
+    );
+
+    return {
+      data: response.data || [],
+      pagination: response.pagination,
+    };
+  }
+
+  static async createDeployment(
+    applicationId: string,
+    params: {
+      environmentId: string;
+      versionId: string;
+      target: {
+        type: string;
+        name: string;
+        config: Record<string, any>;
+      };
+      config?: Record<string, any>;
+    }
+  ): Promise<any> {
+    const response = await this.post<ApiResponse<any>>(
+      `/api/v1/deployments/applications/${applicationId}/deployments`,
+      params
+    );
+    if (!response.success || !response.data) {
+      throw new ApiError(response.error || 'Deployment failed', 400);
+    }
+    return response.data;
+  }
+
+  static async getDeployment(deploymentId: string): Promise<any> {
+    const response = await this.get<ApiResponse<any>>(
+      `/api/v1/deployments/deployments/${deploymentId}`
+    );
+    if (!response.success || !response.data) {
+      throw new ApiError('Deployment not found', 404);
+    }
+    return response.data;
+  }
+
+  static async rollbackDeployment(deploymentId: string): Promise<any> {
+    const response = await this.post<ApiResponse<any>>(
+      `/api/v1/deployments/deployments/${deploymentId}/rollback`
+    );
+    if (!response.success || !response.data) {
+      throw new ApiError(response.error || 'Rollback failed', 400);
+    }
+    return response.data;
+  }
+
+  static async removeDeployment(deploymentId: string): Promise<void> {
+    const response = await this.delete<ApiResponse<any>>(
+      `/api/v1/deployments/deployments/${deploymentId}`
+    );
+    if (!response.success) {
+      throw new ApiError(response.error || 'Remove failed', 400);
+    }
+  }
+
+  // ============================================================
+  // AI API
+  // ============================================================
+
+  static async chat(params: {
+    messages: { role: string; content: string }[];
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<ApiResponse<any>> {
+    return this.post<ApiResponse<any>>('/api/v1/ai/chat', params);
+  }
+
+  static async validateSpec(spec: any): Promise<ApiResponse<any>> {
+    return this.post<ApiResponse<any>>('/api/v1/ai/validate-spec', { spec });
+  }
+
+  static async repairSpec(spec: any): Promise<ApiResponse<any>> {
+    return this.post<ApiResponse<any>>('/api/v1/ai/repair-spec', { spec });
+  }
+
+  // ============================================================
+  // HEALTH
+  // ============================================================
+
+  static async healthCheck(): Promise<any> {
+    return this.get<any>('/health');
   }
 }
 
@@ -565,3 +887,5 @@ export class ApiClient {
 // ============================================================
 
 export const api = ApiClient;
+
+export default ApiClient;
