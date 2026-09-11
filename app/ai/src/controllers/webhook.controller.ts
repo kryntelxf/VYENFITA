@@ -47,7 +47,7 @@ export class WebhookController {
    * Get all webhooks
    * GET /api/v1/webhooks
    */
-  async getAll(req: Request, res: Response): Promise<void> {
+  async getAll(_req: Request, res: Response): Promise<void> {
     try {
       const webhooks = webhookManager.getWebhooks();
 
@@ -194,16 +194,18 @@ export class WebhookController {
       const updates: Partial<typeof webhook> = {};
       if (name) updates.name = name;
       if (url) updates.url = url;
-      if (events) updates.events = events.map((event: any) => ({
-        id: `evt-${Date.now()}`,
-        type: event,
-        timestamp: new Date(),
-        data: {},
-      }));
+      if (events) {
+        updates.events = events.map((event: any) => ({
+          id: `evt-${Date.now()}`,
+          type: event,
+          timestamp: new Date(),
+          data: {},
+        }));
+      }
       if (headers) updates.headers = headers;
       if (retryConfig) updates.retryConfig = retryConfig;
 
-      const success = webhookManager.updateWebhook(webhookId, updates);
+      webhookManager.updateWebhook(webhookId, updates);
 
       res.json({
         success: true,
