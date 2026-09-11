@@ -2,10 +2,6 @@
  * VYENFITA Marketplace Manager
  * 
  * Manages template marketplace for VYENFITA platform
- * - Upload templates
- * - Download templates
- * - Rate templates
- * - Search templates
  * 
  * @version 1.0.0
  */
@@ -46,6 +42,38 @@ export interface Review {
   helpful: number;
 }
 
+/**
+ * Empty ApplicationSpec factory
+ */
+function emptySpec(name: string, description: string): ApplicationSpec {
+  return {
+    metadata: {
+      name,
+      description,
+      version: '1.0.0',
+      status: 'draft',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    requirements: [],
+    entities: [],
+    pages: [],
+    queries: [],
+    roles: [],
+    dataSources: [],
+    workflows: [],
+    integrations: [],
+    tests: { unit: [], integration: [], security: [] },
+    deployment: {
+      environments: [],
+      autoDeploy: false,
+      requireApproval: true,
+      healthCheck: { path: '/health', timeout: 5000, expectedStatus: 200 },
+    },
+    audit: { changes: [], logs: [] },
+  } as ApplicationSpec;
+}
+
 export class MarketplaceManager {
   private templates: Map<string, Template>;
 
@@ -54,9 +82,6 @@ export class MarketplaceManager {
     this.initializeDefaultTemplates();
   }
 
-  /**
-   * Initialize default templates
-   */
   private initializeDefaultTemplates(): void {
     // CRM Template
     this.uploadTemplate({
@@ -68,31 +93,7 @@ export class MarketplaceManager {
       version: '1.0.0',
       author: 'VYENFITA Team',
       authorEmail: 'team@vyenfita.com',
-      spec: {
-        metadata: {
-          name: 'CRM System',
-          description: 'Customer Relationship Management',
-          version: '1.0.0',
-          status: 'draft',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        requirements: [],
-        entities: [],
-        pages: [],
-        roles: [],
-        dataSources: [],
-        workflows: [],
-        integrations: [],
-        tests: { unit: [], integration: [], security: [] },
-        deployment: {
-          environments: [],
-          autoDeploy: false,
-          requireApproval: true,
-          healthCheck: { path: '/health', timeout: 5000, expectedStatus: 200 },
-        },
-        audit: { changes: [], logs: [] },
-      },
+      spec: emptySpec('CRM System', 'Customer Relationship Management'),
       rating: 4.8,
       reviews: [
         {
@@ -125,31 +126,7 @@ export class MarketplaceManager {
       version: '1.0.0',
       author: 'VYENFITA Team',
       authorEmail: 'team@vyenfita.com',
-      spec: {
-        metadata: {
-          name: 'E-Commerce Platform',
-          description: 'Online store with product management',
-          version: '1.0.0',
-          status: 'draft',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        requirements: [],
-        entities: [],
-        pages: [],
-        roles: [],
-        dataSources: [],
-        workflows: [],
-        integrations: [],
-        tests: { unit: [], integration: [], security: [] },
-        deployment: {
-          environments: [],
-          autoDeploy: false,
-          requireApproval: true,
-          healthCheck: { path: '/health', timeout: 5000, expectedStatus: 200 },
-        },
-        audit: { changes: [], logs: [] },
-      },
+      spec: emptySpec('E-Commerce Platform', 'Online store with product management'),
       rating: 4.7,
       reviews: [
         {
@@ -181,31 +158,7 @@ export class MarketplaceManager {
       version: '1.0.0',
       author: 'VYENFITA Team',
       authorEmail: 'team@vyenfita.com',
-      spec: {
-        metadata: {
-          name: 'Support Desk',
-          description: 'Customer support ticketing system',
-          version: '1.0.0',
-          status: 'draft',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        requirements: [],
-        entities: [],
-        pages: [],
-        roles: [],
-        dataSources: [],
-        workflows: [],
-        integrations: [],
-        tests: { unit: [], integration: [], security: [] },
-        deployment: {
-          environments: [],
-          autoDeploy: false,
-          requireApproval: true,
-          healthCheck: { path: '/health', timeout: 5000, expectedStatus: 200 },
-        },
-        audit: { changes: [], logs: [] },
-      },
+      spec: emptySpec('Support Desk', 'Customer support ticketing system'),
       rating: 4.9,
       reviews: [
         {
@@ -221,16 +174,13 @@ export class MarketplaceManager {
       downloads: 312,
       createdAt: new Date(),
       updatedAt: new Date(),
-      tags: ['support', 'tickets', 'slA', 'customer-service'],
+      tags: ['support', 'tickets', 'sla', 'customer-service'],
       price: 'free',
       license: 'mit',
       demoUrl: 'https://demo.vyenfita.com/support',
     });
   }
 
-  /**
-   * Upload a template
-   */
   uploadTemplate(template: Partial<Template>): Template {
     const id = template.id || uuidv4();
     const newTemplate: Template = {
@@ -242,7 +192,7 @@ export class MarketplaceManager {
       version: template.version || '1.0.0',
       author: template.author || 'Unknown',
       authorEmail: template.authorEmail || 'unknown@example.com',
-      spec: template.spec || { metadata: {} } as ApplicationSpec,
+      spec: template.spec || emptySpec('Unnamed', 'Unnamed template'),
       rating: template.rating || 0,
       reviews: template.reviews || [],
       downloads: template.downloads || 0,
@@ -260,23 +210,14 @@ export class MarketplaceManager {
     return newTemplate;
   }
 
-  /**
-   * Get all templates
-   */
   getTemplates(): Template[] {
     return Array.from(this.templates.values());
   }
 
-  /**
-   * Get a specific template
-   */
   getTemplate(id: string): Template | undefined {
     return this.templates.get(id);
   }
 
-  /**
-   * Search templates
-   */
   searchTemplates(query: string): Template[] {
     const results: Template[] = [];
     const q = query.toLowerCase();
@@ -285,7 +226,7 @@ export class MarketplaceManager {
       if (
         template.name.toLowerCase().includes(q) ||
         template.description.toLowerCase().includes(q) ||
-        template.tags.some(tag => tag.toLowerCase().includes(q)) ||
+        template.tags.some((tag) => tag.toLowerCase().includes(q)) ||
         template.category.includes(q)
       ) {
         results.push(template);
@@ -295,9 +236,6 @@ export class MarketplaceManager {
     return results;
   }
 
-  /**
-   * Download a template (increment download count)
-   */
   downloadTemplate(id: string): Template | undefined {
     const template = this.templates.get(id);
     if (!template) return undefined;
@@ -307,10 +245,12 @@ export class MarketplaceManager {
     return template;
   }
 
-  /**
-   * Add review to a template
-   */
-  addReview(templateId: string, userId: string, rating: number, comment: string): Review | undefined {
+  addReview(
+    templateId: string,
+    userId: string,
+    rating: number,
+    comment: string
+  ): Review | undefined {
     const template = this.templates.get(templateId);
     if (!template) return undefined;
 
@@ -327,7 +267,6 @@ export class MarketplaceManager {
     template.reviews.push(review);
     template.updatedAt = new Date();
 
-    // Update average rating
     const totalRating = template.reviews.reduce((sum, r) => sum + r.rating, 0);
     template.rating = totalRating / template.reviews.length;
 
@@ -335,16 +274,10 @@ export class MarketplaceManager {
     return review;
   }
 
-  /**
-   * Delete a template
-   */
   deleteTemplate(id: string): boolean {
     return this.templates.delete(id);
   }
 
-  /**
-   * Get templates by category
-   */
   getTemplatesByCategory(category: string): Template[] {
     const results: Template[] = [];
     for (const template of this.templates.values()) {
@@ -355,21 +288,15 @@ export class MarketplaceManager {
     return results;
   }
 
-  /**
-   * Get top templates by rating
-   */
   getTopTemplates(limit: number = 10): Template[] {
     return Array.from(this.templates.values())
       .sort((a, b) => b.rating - a.rating)
       .slice(0, limit);
   }
 
-  /**
-   * Get popular templates
-   */
   getPopularTemplates(limit: number = 10): Template[] {
     return Array.from(this.templates.values())
       .sort((a, b) => b.downloads - a.downloads)
       .slice(0, limit);
   }
-}
+      }
