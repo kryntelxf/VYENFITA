@@ -11,30 +11,17 @@
  */
 
 import { Request, Response } from 'express';
-import { Logger } from 'winston';
 import { AdvancedWorkflowEngine } from '../core/engine/advanced-workflow-engine';
-import { AIService } from '../core/services/ai.service';
-
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  transports: [new winston.transports.Console({ format: winston.format.simple() })],
-});
+import { logger } from '../lib/observability/logger';
 
 const workflowEngine = new AdvancedWorkflowEngine(logger);
 
 export class AdvancedWorkflowController {
-  private aiService: AIService;
-
-  constructor() {
-    this.aiService = new AIService();
-  }
-
   /**
    * Get all workflow templates
    * GET /api/v1/workflow/templates
    */
-  async getTemplates(req: Request, res: Response): Promise<void> {
+  async getTemplates(_req: Request, res: Response): Promise<void> {
     try {
       const templates = workflowEngine.getTemplates();
       res.json({
@@ -116,7 +103,7 @@ export class AdvancedWorkflowController {
   async executeWorkflow(req: Request, res: Response): Promise<void> {
     try {
       const { workflow, variables, triggerData } = req.body;
-      const tenantId = req.headers['x-tenant-id'] as string || 'default';
+      const tenantId = (req.headers['x-tenant-id'] as string) || 'default';
 
       if (!workflow) {
         res.status(400).json({
@@ -274,4 +261,4 @@ export class AdvancedWorkflowController {
       });
     }
   }
-  }
+        }
