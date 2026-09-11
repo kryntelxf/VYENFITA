@@ -1,6 +1,9 @@
 /**
  * VYENFITA Routes
  * 
+ * Mounted at /vyenfita/* in the main Appsmith router.
+ * All routes below are RELATIVE to /vyenfita.
+ * 
  * @version 1.0.0
  */
 
@@ -16,28 +19,40 @@ import NewApplicationPage from './pages/NewApplicationPage';
 import WorkflowsPage from './pages/WorkflowsPage';
 import SettingsPage from './pages/SettingsPage';
 
+function LoadingScreen() {
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily:
+          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        background: '#f5f6fa',
+        color: '#666',
+        fontSize: '14px',
+      }}
+    >
+      Loading VYENFITA...
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'sans-serif',
-        }}
-      >
-        Loading...
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingScreen />;
 
   if (!isAuthenticated) {
-    return <Navigate to="/vyenfita/login" state={{ from: location }} replace />;
+    return (
+      <Navigate
+        to="/vyenfita/login"
+        state={{ from: location.pathname }}
+        replace
+      />
+    );
   }
 
   return <Layout>{children}</Layout>;
@@ -46,21 +61,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
-    return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'sans-serif',
-        }}
-      >
-        Loading...
-      </div>
-    );
-  }
+  if (isLoading) return <LoadingScreen />;
 
   if (isAuthenticated) {
     return <Navigate to="/vyenfita/dashboard" replace />;
@@ -73,6 +74,7 @@ export default function VYENFITARoutes() {
   return (
     <AuthProvider>
       <Routes>
+        {/* Public routes */}
         <Route
           path="login"
           element={
@@ -89,6 +91,8 @@ export default function VYENFITARoutes() {
             </PublicRoute>
           }
         />
+
+        {/* Protected routes */}
         <Route
           path="dashboard"
           element={
@@ -114,7 +118,23 @@ export default function VYENFITARoutes() {
           }
         />
         <Route
+          path="applications/:id"
+          element={
+            <ProtectedRoute>
+              <ApplicationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="workflows"
+          element={
+            <ProtectedRoute>
+              <WorkflowsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="workflows/:id"
           element={
             <ProtectedRoute>
               <WorkflowsPage />
@@ -137,9 +157,11 @@ export default function VYENFITARoutes() {
             </ProtectedRoute>
           }
         />
+
+        {/* Redirects */}
         <Route path="" element={<Navigate to="dashboard" replace />} />
         <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Routes>
     </AuthProvider>
   );
-          }
+        }
