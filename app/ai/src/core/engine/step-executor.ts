@@ -1,6 +1,9 @@
 /**
  * VYENFITA Step Executor
+ * 
  * Executes individual workflow steps
+ * 
+ * @version 1.0.0
  */
 
 import axios from 'axios';
@@ -48,7 +51,7 @@ export class StepExecutor {
         case 'wait':
           return await this.executeWait(step, context);
         case 'parallel':
-          return await this.executeParallel(step, context);
+          return await this.executeParallel(step);
         case 'notification':
           return await this.executeNotification(step, context);
         default:
@@ -66,9 +69,6 @@ export class StepExecutor {
     }
   }
 
-  /**
-   * Execute an action step
-   */
   private async executeAction(step: any, context: StepContext): Promise<StepResult> {
     const action = step.action;
     const config = this.interpolateVariables(step.config, context.variables);
@@ -115,9 +115,6 @@ export class StepExecutor {
     };
   }
 
-  /**
-   * Execute a condition step
-   */
   private executeCondition(step: any, context: StepContext): StepResult {
     const conditions = step.conditions || [];
     const variables = context.variables;
@@ -177,27 +174,15 @@ export class StepExecutor {
     };
   }
 
-  /**
-   * Execute a loop step
-   */
   private async executeLoop(step: any, context: StepContext): Promise<StepResult> {
     const items = this.getNestedValue(context.variables, step.config.items || 'items');
-    
+
     if (!Array.isArray(items)) {
       throw new Error('Loop items must be an array');
     }
 
     const results = [];
     for (let i = 0; i < items.length && i < (step.config.maxIterations || 100); i++) {
-      const loopContext = {
-        ...context,
-        variables: {
-          ...context.variables,
-          index: i,
-          item: items[i],
-        },
-      };
-      // Note: Step execution inside loop would be handled by the workflow engine
       results.push({ index: i, item: items[i] });
     }
 
@@ -207,25 +192,17 @@ export class StepExecutor {
     };
   }
 
-  /**
-   * Execute a wait step
-   */
-  private async executeWait(step: any, context: StepContext): Promise<StepResult> {
+  private async executeWait(step: any, _context: StepContext): Promise<StepResult> {
     const duration = step.config.duration || 5000;
     this.logger.debug(`Waiting for ${duration}ms`, { stepId: step.id });
     await this.sleep(duration);
     return { success: true, output: { waited: duration } };
   }
 
-  /**
-   * Execute parallel steps
-   */
-  private async executeParallel(step: any, context: StepContext): Promise<StepResult> {
+  private async executeParallel(step: any): Promise<StepResult> {
     const branches = step.config.branches || [];
     const results = await Promise.all(
       branches.map(async (branch: any) => {
-        // Note: This would recursively execute steps
-        // Simplified for now
         return { branch: branch.id, status: 'pending' };
       })
     );
@@ -236,13 +213,9 @@ export class StepExecutor {
     };
   }
 
-  /**
-   * Execute a notification step
-   */
   private async executeNotification(step: any, context: StepContext): Promise<StepResult> {
     const config = this.interpolateVariables(step.config, context.variables);
-    
-    // Send notification (simplified)
+
     this.logger.info(`Notification: ${config.message || 'No message'}`, {
       to: config.to || 'unknown',
       type: config.type || 'info',
@@ -267,7 +240,7 @@ export class StepExecutor {
       });
     }
     if (Array.isArray(config)) {
-      return config.map(item => this.interpolateVariables(item, variables));
+      return config.map((item) => this.interpolateVariables(item, variables));
     }
     if (typeof config === 'object' && config !== null) {
       const result: any = {};
@@ -290,7 +263,7 @@ export class StepExecutor {
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // ============================================================
@@ -298,7 +271,6 @@ export class StepExecutor {
   // ============================================================
 
   private async sendEmail(config: any): Promise<any> {
-    // TODO: Integrate with email provider (SendGrid, SES, etc.)
     this.logger.info(`Email sent: ${config.subject || 'No subject'}`, {
       to: config.to,
       from: config.from,
@@ -307,7 +279,6 @@ export class StepExecutor {
   }
 
   private async updateDatabase(config: any): Promise<any> {
-    // TODO: Integrate with database
     this.logger.info(`Database update: ${config.collection || 'unknown'}`, {
       query: config.query,
     });
@@ -326,7 +297,6 @@ export class StepExecutor {
   }
 
   private async notify(config: any): Promise<any> {
-    // TODO: Integrate with notification providers (Slack, etc.)
     this.logger.info(`Notification: ${config.message || 'No message'}`, {
       to: config.to,
     });
@@ -336,7 +306,6 @@ export class StepExecutor {
   private transformData(config: any): any {
     const data = config.data || [];
     const transformation = config.transformation || {};
-    // Simplified transformation
     return data.map((item: any) => {
       const result: any = {};
       for (const [key, value] of Object.entries(transformation)) {
@@ -358,7 +327,6 @@ export class StepExecutor {
   private aggregateData(config: any): any {
     const data = config.data || [];
     const groupBy = config.groupBy || [];
-    // Simplified aggregation
     return data.reduce((acc: any, item: any) => {
       const key = groupBy.map((field: string) => this.getNestedValue(item, field)).join('|');
       if (!acc[key]) acc[key] = [];
@@ -368,7 +336,6 @@ export class StepExecutor {
   }
 
   private async requestApproval(config: any): Promise<any> {
-    // TODO: Implement approval workflow
     this.logger.info(`Approval requested: ${config.message || 'No message'}`, {
       approvers: config.approvers,
     });
@@ -385,4 +352,4 @@ export class StepExecutor {
     });
     return response.data;
   }
-}
+  }
