@@ -76,16 +76,11 @@ export class AdvancedWorkflowEngine {
     this.executions = new Map();
     this.templates = new Map();
     this.pendingApprovals = new Map();
-    
-    // Initialize default templates
+
     this.initializeTemplates();
   }
 
-  /**
-   * Initialize default workflow templates
-   */
   private initializeTemplates(): void {
-    // Email approval template
     this.templates.set('email-approval', {
       id: 'email-approval',
       name: 'Email Approval',
@@ -112,7 +107,7 @@ export class AdvancedWorkflowEngine {
           action: 'approval',
           config: {
             approvers: ['{{approver}}'],
-            timeout: 86400000, // 24 hours
+            timeout: 86400000,
           },
           onError: 'stop',
         },
@@ -140,7 +135,6 @@ export class AdvancedWorkflowEngine {
       },
     });
 
-    // Data processing template
     this.templates.set('data-processing', {
       id: 'data-processing',
       name: 'Data Processing Pipeline',
@@ -199,7 +193,6 @@ export class AdvancedWorkflowEngine {
       },
     });
 
-    // Scheduled report template
     this.templates.set('scheduled-report', {
       id: 'scheduled-report',
       name: 'Scheduled Report',
@@ -257,30 +250,20 @@ export class AdvancedWorkflowEngine {
     });
   }
 
-  /**
-   * Get all workflow templates
-   */
   getTemplates(): WorkflowTemplate[] {
     return Array.from(this.templates.values());
   }
 
-  /**
-   * Get a specific template
-   */
   getTemplate(id: string): WorkflowTemplate | undefined {
     return this.templates.get(id);
   }
 
-  /**
-   * Create a workflow from a template
-   */
   createFromTemplate(templateId: string, variables: Record<string, any>): any {
     const template = this.templates.get(templateId);
     if (!template) {
       throw new Error(`Template not found: ${templateId}`);
     }
 
-    // Deep copy and interpolate variables
     const workflow = {
       id: `wf-${uuidv4()}`,
       name: template.name,
@@ -293,9 +276,6 @@ export class AdvancedWorkflowEngine {
     return workflow;
   }
 
-  /**
-   * Start workflow execution with approval support
-   */
   async startExecution(
     workflow: any,
     options: {
@@ -345,9 +325,6 @@ export class AdvancedWorkflowEngine {
     return execution;
   }
 
-  /**
-   * Execute advanced workflow with branching and approval
-   */
   private async executeAdvancedWorkflow(
     workflow: any,
     execution: AdvancedWorkflowExecution
@@ -366,7 +343,6 @@ export class AdvancedWorkflowEngine {
         stepId: step.id,
       });
 
-      // Handle approval steps
       if (step.action === 'approval') {
         const approvalResult = await this.handleApproval(step, execution);
         if (approvalResult.status === 'pending') {
@@ -382,21 +358,18 @@ export class AdvancedWorkflowEngine {
         continue;
       }
 
-      // Handle parallel steps
       if (step.type === 'parallel') {
         await this.executeParallel(step, execution);
         currentStepIndex++;
         continue;
       }
 
-      // Handle sub-workflow
       if (step.type === 'subflow') {
         await this.executeSubWorkflow(step, execution);
         currentStepIndex++;
         continue;
       }
 
-      // Normal step execution
       const stepResult = await this.executeStep(step, execution);
 
       const result: AdvancedWorkflowStepResult = {
@@ -434,7 +407,6 @@ export class AdvancedWorkflowEngine {
         }
       }
 
-      // Check for conditional branching
       if (stepResult.nextStepId) {
         const nextIndex = steps.findIndex((s: any) => s.id === stepResult.nextStepId);
         if (nextIndex !== -1) {
@@ -453,9 +425,6 @@ export class AdvancedWorkflowEngine {
     });
   }
 
-  /**
-   * Handle approval step
-   */
   private async handleApproval(
     step: any,
     execution: AdvancedWorkflowExecution
@@ -476,25 +445,14 @@ export class AdvancedWorkflowEngine {
     this.pendingApprovals.set(approval.id, approval);
     execution.approvals.push(approval);
 
-    // Notify approvers
     this.logger.info(`Approval requested: ${approval.id}`, {
       workflowId: execution.workflowId,
       approvers,
     });
 
-    // TODO: Send notification to approvers (email, Slack, etc.)
-
-    // For now, simulate auto-approval for testing (or wait)
-    // In production, this would wait for webhook/polling
-
-    // Simulate waiting (in real implementation, this would be async)
-    // For now, we'll return pending and the workflow will wait
     return { status: 'pending' };
   }
 
-  /**
-   * Execute parallel steps
-   */
   private async executeParallel(
     step: any,
     execution: AdvancedWorkflowExecution
@@ -502,16 +460,7 @@ export class AdvancedWorkflowEngine {
     const branches = step.config.branches || [];
     const results = await Promise.all(
       branches.map(async (branch: any) => {
-        const branchExecution = {
-          ...execution,
-          steps: [],
-          variables: {
-            ...execution.variables,
-            branchId: branch.id,
-          },
-        };
-        // Execute branch steps
-        // Simplified: just execute each branch step
+        // Execute each branch's steps in parallel
         const stepResults: AdvancedWorkflowStepResult[] = [];
         for (const branchStep of branch.steps || []) {
           const result = await this.executeStep(branchStep, execution);
@@ -540,9 +489,6 @@ export class AdvancedWorkflowEngine {
     });
   }
 
-  /**
-   * Execute sub-workflow
-   */
   private async executeSubWorkflow(
     step: any,
     execution: AdvancedWorkflowExecution
@@ -572,10 +518,10 @@ export class AdvancedWorkflowEngine {
     });
   }
 
-  /**
-   * Execute a single step
-   */
-  private async executeStep(step: any, execution: AdvancedWorkflowExecution): Promise<StepResult> {
+  private async executeStep(
+    step: any,
+    execution: AdvancedWorkflowExecution
+  ): Promise<StepResult> {
     const context: StepContext = {
       variables: execution.variables,
       stepId: step.id,
@@ -594,19 +540,18 @@ export class AdvancedWorkflowEngine {
     }
   }
 
-  /**
-   * Retry a failed step
-   */
-  private async retryStep(step: any, execution: AdvancedWorkflowExecution): Promise<StepResult> {
+  private async retryStep(
+    step: any,
+    execution: AdvancedWorkflowExecution
+  ): Promise<StepResult> {
     const maxAttempts = step.retryConfig?.maxAttempts || 3;
     const delayMs = step.retryConfig?.delayMs || 5000;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       this.logger.debug(`Retry attempt ${attempt}/${maxAttempts} for step ${step.id}`);
-      
-      // Wait before retry
+
       await this.sleep(delayMs);
-      
+
       const result = await this.executeStep(step, execution);
       if (result.success) {
         return result;
@@ -619,16 +564,10 @@ export class AdvancedWorkflowEngine {
     };
   }
 
-  /**
-   * Get execution status
-   */
   getExecution(executionId: string): AdvancedWorkflowExecution | undefined {
     return this.executions.get(executionId);
   }
 
-  /**
-   * Get all executions for a workflow
-   */
   getExecutions(workflowId: string): AdvancedWorkflowExecution[] {
     const results: AdvancedWorkflowExecution[] = [];
     for (const execution of this.executions.values()) {
@@ -639,9 +578,6 @@ export class AdvancedWorkflowEngine {
     return results;
   }
 
-  /**
-   * Approve a pending approval
-   */
   approveApproval(approvalId: string, response?: string): boolean {
     const approval = this.pendingApprovals.get(approvalId);
     if (!approval) return false;
@@ -652,12 +588,10 @@ export class AdvancedWorkflowEngine {
 
     this.pendingApprovals.delete(approvalId);
 
-    // Find the workflow execution and resume
     for (const execution of this.executions.values()) {
-      const approvalIndex = execution.approvals.findIndex(a => a.id === approvalId);
+      const approvalIndex = execution.approvals.findIndex((a) => a.id === approvalId);
       if (approvalIndex !== -1) {
         execution.approvals[approvalIndex] = approval;
-        // Resume execution
         this.resumeExecution(execution);
         return true;
       }
@@ -666,9 +600,6 @@ export class AdvancedWorkflowEngine {
     return false;
   }
 
-  /**
-   * Reject a pending approval
-   */
   rejectApproval(approvalId: string, response?: string): boolean {
     const approval = this.pendingApprovals.get(approvalId);
     if (!approval) return false;
@@ -679,9 +610,8 @@ export class AdvancedWorkflowEngine {
 
     this.pendingApprovals.delete(approvalId);
 
-    // Find the workflow execution and fail
     for (const execution of this.executions.values()) {
-      const approvalIndex = execution.approvals.findIndex(a => a.id === approvalId);
+      const approvalIndex = execution.approvals.findIndex((a) => a.id === approvalId);
       if (approvalIndex !== -1) {
         execution.approvals[approvalIndex] = approval;
         execution.status = 'failed';
@@ -693,20 +623,11 @@ export class AdvancedWorkflowEngine {
     return false;
   }
 
-  /**
-   * Resume workflow execution after approval
-   */
   private resumeExecution(execution: AdvancedWorkflowExecution): void {
-    // Re-run the workflow from where it left off
     this.logger.info(`Resuming workflow execution: ${execution.id}`);
-    // In production, this would use a more sophisticated state management
-    // For now, we just mark it as running again
     execution.status = 'running';
   }
 
-  /**
-   * Interpolate variables in config
-   */
   private interpolateVariables(config: any, variables: Record<string, any>): any {
     if (typeof config === 'string') {
       return config.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
@@ -715,7 +636,7 @@ export class AdvancedWorkflowEngine {
       });
     }
     if (Array.isArray(config)) {
-      return config.map(item => this.interpolateVariables(item, variables));
+      return config.map((item) => this.interpolateVariables(item, variables));
     }
     if (typeof config === 'object' && config !== null) {
       const result: any = {};
@@ -727,9 +648,6 @@ export class AdvancedWorkflowEngine {
     return config;
   }
 
-  /**
-   * Get nested value from object
-   */
   private getNestedValue(obj: any, path: string): any {
     const parts = path.split('.');
     let current = obj;
@@ -740,25 +658,7 @@ export class AdvancedWorkflowEngine {
     return current;
   }
 
-  /**
-   * Sleep for a duration
-   */
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
-
-  /**
-   * Clean up old executions
-   */
-  cleanup(maxAgeMs: number = 7 * 24 * 60 * 60 * 1000): void {
-    const now = Date.now();
-    let count = 0;
-    for (const [id, execution] of this.executions) {
-      if (now - execution.startedAt.getTime() > maxAgeMs) {
-        this.executions.delete(id);
-        count++;
-      }
-    }
-    this.logger.info(`Cleaned up ${count} old executions`);
-  }
-          }
+}
