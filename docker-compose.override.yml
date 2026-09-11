@@ -7,11 +7,12 @@
 # Usage:
 #   docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d
 #
-# Environment variables:
-#   - OPENAI_API_KEY: Your OpenAI API key
-#   - ANTHROPIC_API_KEY: Your Anthropic API key (optional)
+# Required environment variables (create .env in repo root):
+#   - OPENAI_API_KEY or ANTHROPIC_API_KEY: AI provider keys
 #   - AI_API_KEYS: Comma-separated API keys for AI Service
-#   - AI_PROVIDER: Default provider (openai|anthropic)
+#   - JWT_SECRET: Random 32+ char string
+#   - ENCRYPTION_KEY: Random 32+ char string
+#   - DATABASE_URL: PostgreSQL connection string
 # ============================================================
 
 version: '3.8'
@@ -33,40 +34,103 @@ services:
       - "3001:3001"
       - "9090:9090"
     environment:
-      - NODE_ENV=production
+      # Runtime
+      - NODE_ENV=${NODE_ENV:-production}
       - NODE_OPTIONS=--max-old-space-size=4096
+      - SERVICE_VERSION=${SERVICE_VERSION:-3.0.0}
+
+      # Database
+      - DATABASE_URL=${DATABASE_URL}
+
+      # JWT & Session
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-15m}
+      - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-30d}
+
+      # Encryption
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+      # Service
       - AI_SERVICE_PORT=3001
       - AI_SERVICE_HOST=0.0.0.0
       - AI_LOG_LEVEL=${AI_LOG_LEVEL:-info}
+      - AI_LOG_FILE_PATH=/app/logs/ai-service.log
+
+      # AI Providers
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4-turbo-preview}
       - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-4096}
       - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0.7}
+      - OPENAI_TIMEOUT=${OPENAI_TIMEOUT:-60000}
+
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-opus-20240229}
       - ANTHROPIC_MAX_TOKENS=${ANTHROPIC_MAX_TOKENS:-4096}
+      - ANTHROPIC_TEMPERATURE=${ANTHROPIC_TEMPERATURE:-0.7}
+      - ANTHROPIC_TIMEOUT=${ANTHROPIC_TIMEOUT:-60000}
+
+      # AI Service
       - AI_PROVIDER=${AI_PROVIDER:-openai}
       - AI_API_KEYS=${AI_API_KEYS:-vyenfita-default-key}
-      - AI_RATE_LIMIT_ENABLED=${AI_RATE_LIMIT_ENABLED:-true}
-      - AI_RATE_LIMIT_MAX_REQUESTS=${AI_RATE_LIMIT_MAX_REQUESTS:-100}
+
+      # Caching
       - AI_ENABLE_CACHING=${AI_ENABLE_CACHING:-true}
       - AI_CACHE_TTL=${AI_CACHE_TTL:-3600}
+      - AI_CACHE_MAX_ITEMS=${AI_CACHE_MAX_ITEMS:-10000}
+
+      # Rate limiting
+      - AI_RATE_LIMIT_ENABLED=${AI_RATE_LIMIT_ENABLED:-true}
+      - AI_RATE_LIMIT_MAX_REQUESTS=${AI_RATE_LIMIT_MAX_REQUESTS:-1000}
+      - AI_RATE_LIMIT_WINDOW_MS=${AI_RATE_LIMIT_WINDOW_MS:-60000}
+
+      # Retry & circuit breaker
+      - AI_RETRY_ATTEMPTS=${AI_RETRY_ATTEMPTS:-3}
+      - AI_RETRY_BACKOFF_MS=${AI_RETRY_BACKOFF_MS:-1000}
+      - AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD=${AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-5}
+      - AI_CIRCUIT_BREAKER_TIMEOUT_MS=${AI_CIRCUIT_BREAKER_TIMEOUT_MS:-30000}
+
+      # Feature flags
       - AI_ENABLE_APPLICATION_GENERATION=${AI_ENABLE_APPLICATION_GENERATION:-true}
       - AI_ENABLE_WORKFLOW_GENERATION=${AI_ENABLE_WORKFLOW_GENERATION:-true}
       - AI_ENABLE_AUTOMATION=${AI_ENABLE_AUTOMATION:-true}
+      - AI_ENABLE_AUDIT_LOGS=${AI_ENABLE_AUDIT_LOGS:-true}
+
+      # Request limits
       - AI_MAX_CONCURRENT_REQUESTS=${AI_MAX_CONCURRENT_REQUESTS:-10}
       - AI_REQUEST_TIMEOUT_MS=${AI_REQUEST_TIMEOUT_MS:-30000}
-      - AI_ENABLE_METRICS=${AI_ENABLE_METRICS:-true}
-      - AI_METRICS_PORT=${AI_METRICS_PORT:-9090}
+
+      # Observability
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      - METRICS_PORT=${METRICS_PORT:-9090}
+
+      # Scheduler (Phase 11)
+      - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-true}
+      - SCHEDULER_POLL_INTERVAL_MS=${SCHEDULER_POLL_INTERVAL_MS:-30000}
+
+      # Deployment (Phase 5)
+      - DOCKER_NETWORK=${DOCKER_NETWORK:-vyenfita-deployments}
+      - RUNTIME_IMAGE=${RUNTIME_IMAGE:-node:24.14.1-alpine}
+      - ARTIFACTS_DIR=${ARTIFACTS_DIR:-/tmp/vyenfita-artifacts}
+
+      # Security
+      - BCRYPT_ROUNDS=${BCRYPT_ROUNDS:-12}
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-90}
+
+      # Integration
       - APPSMITH_API_URL=http://appsmith:8080/api/v1
-      - AI_ENABLE_AUDIT_LOGS=${AI_ENABLE_AUDIT_LOGS:-true}
-      - AI_LOG_FILE_PATH=/app/logs/ai-service.log
     volumes:
       - ./app/ai/logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock # For deployments
     networks:
       - appsmith
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}) || exit 1"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3001/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)}) || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -84,13 +148,18 @@ services:
   # ==========================================================
   appsmith:
     environment:
+      # VYENFITA AI Integration
       - APPSMITH_AI_ENABLED=${APPSMITH_AI_ENABLED:-true}
       - APPSMITH_AI_SERVICE_URL=http://vyenfita-ai:3001
       - APPSMITH_AI_API_KEY=${AI_API_KEYS:-vyenfita-default-key}
       - APPSMITH_AI_TIMEOUT=${APPSMITH_AI_TIMEOUT:-30000}
       - APPSMITH_AI_DEFAULT_PROVIDER=${AI_PROVIDER:-openai}
+
+      # VYENFITA Feature flags
       - APPSMITH_FEATURE_AI_APPLICATION_GENERATION=${APPSMITH_FEATURE_AI_APPLICATION_GENERATION:-true}
       - APPSMITH_FEATURE_AI_WORKFLOW_GENERATION=${APPSMITH_FEATURE_AI_WORKFLOW_GENERATION:-true}
+
+      # VYENFITA Health check & retry
       - APPSMITH_AI_HEALTH_CHECK_INTERVAL=${APPSMITH_AI_HEALTH_CHECK_INTERVAL:-60}
       - APPSMITH_AI_RETRY_ATTEMPTS=${APPSMITH_AI_RETRY_ATTEMPTS:-3}
       - APPSMITH_AI_RETRY_BACKOFF_MS=${APPSMITH_AI_RETRY_BACKOFF_MS:-1000}
@@ -106,4 +175,6 @@ networks:
     driver: bridge
 
 volumes:
-  # Optional volumes can be added here
+  # Optional volumes
+  vyenfita-artifacts:
+    driver: local
