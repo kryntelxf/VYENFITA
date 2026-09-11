@@ -26,11 +26,7 @@ export class EnterpriseController {
   // SSO
   // ============================================================
 
-  /**
-   * Get SSO providers
-   * GET /api/v1/enterprise/sso/providers
-   */
-  async getSSOProviders(req: Request, res: Response): Promise<void> {
+  async getSSOProviders(_req: Request, res: Response): Promise<void> {
     try {
       const providers = ssoService.getProviders();
 
@@ -49,10 +45,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get SSO authorization URL
-   * GET /api/v1/enterprise/sso/auth/:providerId
-   */
   async getAuthUrl(req: Request, res: Response): Promise<void> {
     try {
       const { providerId } = req.params;
@@ -69,7 +61,7 @@ export class EnterpriseController {
       const url = ssoService.getAuthorizationUrl(
         providerId,
         redirectUri as string,
-        state as string || 'default'
+        (state as string) || 'default'
       );
 
       res.json({
@@ -86,10 +78,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Handle SSO callback
-   * POST /api/v1/enterprise/sso/callback
-   */
   async handleCallback(req: Request, res: Response): Promise<void> {
     try {
       const { providerId, code, redirectUri } = req.body;
@@ -131,10 +119,6 @@ export class EnterpriseController {
   // AUDIT TRAIL
   // ============================================================
 
-  /**
-   * Get audit events
-   * GET /api/v1/enterprise/audit/events
-   */
   async getAuditEvents(req: Request, res: Response): Promise<void> {
     try {
       const { tenantId, userId, eventType, status, resource, limit, offset, startDate, endDate } = req.query;
@@ -145,8 +129,8 @@ export class EnterpriseController {
         eventType: eventType as any,
         status: status as any,
         resource: resource as string,
-        limit: limit ? parseInt(limit as string) : undefined,
-        offset: offset ? parseInt(offset as string) : undefined,
+        limit: limit ? parseInt(limit as string, 10) : undefined,
+        offset: offset ? parseInt(offset as string, 10) : undefined,
         startDate: startDate ? new Date(startDate as string) : undefined,
         endDate: endDate ? new Date(endDate as string) : undefined,
       });
@@ -166,10 +150,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get audit summary
-   * GET /api/v1/enterprise/audit/summary
-   */
   async getAuditSummary(req: Request, res: Response): Promise<void> {
     try {
       const { tenantId, startDate, endDate } = req.query;
@@ -202,10 +182,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get security summary
-   * GET /api/v1/enterprise/audit/security
-   */
   async getSecuritySummary(req: Request, res: Response): Promise<void> {
     try {
       const { tenantId, days } = req.query;
@@ -220,7 +196,7 @@ export class EnterpriseController {
 
       const summary = auditService.getSecuritySummary(
         tenantId as string,
-        days ? parseInt(days as string) : 30
+        days ? parseInt(days as string, 10) : 30
       );
 
       res.json({
@@ -241,11 +217,7 @@ export class EnterpriseController {
   // RBAC
   // ============================================================
 
-  /**
-   * Get roles
-   * GET /api/v1/enterprise/rbac/roles
-   */
-  async getRoles(req: Request, res: Response): Promise<void> {
+  async getRoles(_req: Request, res: Response): Promise<void> {
     try {
       const roles = rbacService.getRoles();
 
@@ -264,10 +236,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Create a role
-   * POST /api/v1/enterprise/rbac/roles
-   */
   async createRole(req: Request, res: Response): Promise<void> {
     try {
       const { name, description, permissions, hierarchy, isDefault } = req.body;
@@ -296,10 +264,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Update a role
-   * PUT /api/v1/enterprise/rbac/roles/:roleId
-   */
   async updateRole(req: Request, res: Response): Promise<void> {
     try {
       const { roleId } = req.params;
@@ -329,10 +293,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Delete a role
-   * DELETE /api/v1/enterprise/rbac/roles/:roleId
-   */
   async deleteRole(req: Request, res: Response): Promise<void> {
     try {
       const { roleId } = req.params;
@@ -361,10 +321,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Check permission
-   * POST /api/v1/enterprise/rbac/check
-   */
   async checkPermission(req: Request, res: Response): Promise<void> {
     try {
       const { userRoles, resource, action, attributes } = req.body;
@@ -397,10 +353,6 @@ export class EnterpriseController {
   // APPLICATION ANALYTICS
   // ============================================================
 
-  /**
-   * Record an event
-   * POST /api/v1/enterprise/analytics/event
-   */
   async recordEvent(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId, tenantId, userId, sessionId, type, data, duration, error } = req.body;
@@ -438,10 +390,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get application analytics
-   * GET /api/v1/enterprise/analytics/applications/:applicationId
-   */
   async getAppAnalytics(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId } = req.params;
@@ -467,10 +415,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get tenant analytics
-   * GET /api/v1/enterprise/analytics/tenants/:tenantId
-   */
   async getTenantAnalytics(req: Request, res: Response): Promise<void> {
     try {
       const { tenantId } = req.params;
@@ -491,10 +435,6 @@ export class EnterpriseController {
     }
   }
 
-  /**
-   * Get user journey
-   * GET /api/v1/enterprise/analytics/applications/:applicationId/journey/:userId
-   */
   async getUserJourney(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId, userId } = req.params;
@@ -503,7 +443,7 @@ export class EnterpriseController {
       const journey = analyticsService.getUserJourney(
         applicationId,
         userId,
-        limit ? parseInt(limit as string) : 50
+        limit ? parseInt(limit as string, 10) : 50
       );
 
       res.json({
@@ -520,4 +460,4 @@ export class EnterpriseController {
       });
     }
   }
-    }
+      }
