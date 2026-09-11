@@ -14,7 +14,7 @@ export class ObservabilityController {
    * Prometheus metrics
    * GET /metrics
    */
-  async metrics(req: Request, res: Response): Promise<void> {
+  async metrics(_req: Request, res: Response): Promise<void> {
     const metrics = getMetrics();
     res.setHeader('Content-Type', 'text/plain; version=0.0.4');
     res.send(metrics.expose());
@@ -24,7 +24,7 @@ export class ObservabilityController {
    * Full health check
    * GET /health
    */
-  async health(req: Request, res: Response): Promise<void> {
+  async health(_req: Request, res: Response): Promise<void> {
     const report = await HealthService.check();
     const statusCode = report.status === 'unhealthy' ? 503 : 200;
     res.status(statusCode).json(report);
@@ -34,7 +34,7 @@ export class ObservabilityController {
    * Liveness check
    * GET /health/liveness
    */
-  async liveness(req: Request, res: Response): Promise<void> {
+  async liveness(_req: Request, res: Response): Promise<void> {
     const result = HealthService.liveness();
     res.json(result);
   }
@@ -43,7 +43,7 @@ export class ObservabilityController {
    * Readiness check
    * GET /health/readiness
    */
-  async readiness(req: Request, res: Response): Promise<void> {
+  async readiness(_req: Request, res: Response): Promise<void> {
     const result = await HealthService.readiness();
     res.status(result.ready ? 200 : 503).json(result);
   }
@@ -52,7 +52,7 @@ export class ObservabilityController {
    * Current trace spans
    * GET /debug/traces
    */
-  async traces(req: Request, res: Response): Promise<void> {
+  async traces(_req: Request, res: Response): Promise<void> {
     const spans = TracingService.getSpans();
     const traceId = TracingService.getTraceId();
 
@@ -62,4 +62,4 @@ export class ObservabilityController {
       spans,
     });
   }
-}
+  }
