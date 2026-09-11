@@ -1,3 +1,11 @@
+/**
+ * VYENFITA OpenAI Provider
+ * 
+ * Implements the AIProvider interface for OpenAI API
+ * 
+ * @version 1.0.0
+ */
+
 import { OpenAI } from 'openai';
 import {
   AIProvider,
@@ -11,14 +19,8 @@ import {
   HealthCheckResult,
   StreamChunk,
   ChatMessage,
-  Choice,
-  Usage,
 } from '../interfaces/ai-provider.interface';
 
-/**
- * OpenAI Provider Implementation
- * Implements the AIProvider interface for OpenAI API
- */
 export class OpenAIProvider implements AIProvider {
   readonly name = 'openai';
   readonly version = '1.0.0';
@@ -35,9 +37,10 @@ export class OpenAIProvider implements AIProvider {
     });
   }
 
-  async generateChatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
+  async generateChatCompletion(
+    params: ChatCompletionParams
+  ): Promise<ChatCompletionResponse> {
     try {
-      const startTime = Date.now();
       const response = await this.client.chat.completions.create({
         model: params.model || this.config.model,
         messages: this.convertMessages(params.messages),
@@ -49,18 +52,7 @@ export class OpenAIProvider implements AIProvider {
         frequency_penalty: params.frequencyPenalty ?? this.config.frequencyPenalty,
         presence_penalty: params.presencePenalty ?? this.config.presencePenalty,
         user: params.user,
-        tools: params.functions?.map((f) => ({
-          type: 'function' as const,
-          function: {
-            name: f.name,
-            description: f.description,
-            parameters: f.parameters,
-          },
-        })),
-        tool_choice: this.convertFunctionCall(params.functionCall),
       });
-
-      const elapsed = Date.now() - startTime;
 
       return {
         id: response.id,
@@ -95,7 +87,9 @@ export class OpenAIProvider implements AIProvider {
     }
   }
 
-  async *streamChatCompletion(params: ChatCompletionParams): AsyncIterable<StreamChunk> {
+  async *streamChatCompletion(
+    params: ChatCompletionParams
+  ): AsyncIterable<StreamChunk> {
     try {
       const response = await this.client.chat.completions.create({
         model: params.model || this.config.model,
@@ -131,7 +125,6 @@ export class OpenAIProvider implements AIProvider {
         };
       }
 
-      // Final chunk to signal completion
       yield {
         id: 'done',
         choices: [],
@@ -144,7 +137,9 @@ export class OpenAIProvider implements AIProvider {
     }
   }
 
-  async generateTextCompletion(params: TextCompletionParams): Promise<TextCompletionResponse> {
+  async generateTextCompletion(
+    params: TextCompletionParams
+  ): Promise<TextCompletionResponse> {
     try {
       const response = await this.client.completions.create({
         model: this.config.model,
@@ -173,7 +168,9 @@ export class OpenAIProvider implements AIProvider {
     }
   }
 
-  async generateEmbeddings(params: EmbeddingParams): Promise<EmbeddingResponse> {
+  async generateEmbeddings(
+    params: EmbeddingParams
+  ): Promise<EmbeddingResponse> {
     try {
       const response = await this.client.embeddings.create({
         model: params.model || 'text-embedding-3-small',
@@ -243,7 +240,6 @@ export class OpenAIProvider implements AIProvider {
   }
 
   estimateTokens(messages: ChatMessage[]): number {
-    // Rough estimation: ~4 characters per token for English text
     const totalChars = messages.reduce((sum, msg) => sum + msg.content.length, 0);
     return Math.ceil(totalChars / 4);
   }
@@ -266,16 +262,8 @@ export class OpenAIProvider implements AIProvider {
     }));
   }
 
-  private convertFunctionCall(functionCall?: 'auto' | 'none' | { name: string }): any {
-    if (!functionCall) return undefined;
-    if (functionCall === 'auto') return 'auto';
-    if (functionCall === 'none') return 'none';
-    return { name: functionCall.name };
-  }
-
   private getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
-      // Check for OpenAI specific error
       const openAIError = error as any;
       if (openAIError.response?.data?.error?.message) {
         return openAIError.response.data.error.message;
@@ -284,4 +272,4 @@ export class OpenAIProvider implements AIProvider {
     }
     return String(error);
   }
-              }
+          }
