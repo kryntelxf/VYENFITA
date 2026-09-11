@@ -15,7 +15,7 @@ export class AgentController {
    * List all agents
    * GET /api/v1/agents
    */
-  async listAgents(req: Request, res: Response): Promise<void> {
+  async listAgents(_req: Request, res: Response): Promise<void> {
     try {
       const registry = getAgentRegistry();
       res.json({
@@ -131,4 +131,4 @@ export class AgentController {
       });
     }
   }
-}
+            }
