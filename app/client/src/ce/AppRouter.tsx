@@ -65,6 +65,18 @@ import { getIsConsolidatedPageLoading } from "selectors/ui";
 import { useFeatureFlagOverride } from "utils/hooks/useFeatureFlagOverride";
 import { SentryRoute } from "components/SentryRoute";
 
+// ============================================================
+// VYENFITA
+// ============================================================
+// VYENFITA UI is mounted at /vyenfita/* and is self-contained:
+// - Own auth (localStorage-based JWT)
+// - Own layout (no Appsmith header)
+// - Own API client (VYENFITA AI backend)
+// - Isolation from Appsmith state
+// ============================================================
+import { VYENFITAMount } from "../vyenfita";
+import { VYENFITA_BASE_PATH } from "../vyenfita/constants";
+
 export const loadingIndicator = <PageLoadingBar />;
 
 export function Routes() {
@@ -76,6 +88,20 @@ export function Routes() {
 
   return (
     <Switch>
+      {/*
+       * ============================================================
+       * VYENFITA ROUTES — MUST BE FIRST
+       * ============================================================
+       * The /vyenfita/* route must be placed BEFORE all Appsmith routes
+       * to prevent conflicts. VYENFITA is a self-contained sub-app.
+       */}
+      <SentryRoute component={VYENFITAMount} path={VYENFITA_BASE_PATH} />
+
+      {/*
+       * ============================================================
+       * APPSMITH ROUTES
+       * ============================================================
+       */}
       <SentryRoute component={LandingScreen} exact path={BASE_URL} />
       <Redirect exact from={BASE_LOGIN_URL} to={AUTH_LOGIN_URL} />
       <Redirect exact from={BASE_SIGNUP_URL} to={SIGN_UP_URL} />
@@ -177,6 +203,17 @@ export default function AppRouter() {
 
   if (isLoading) return null;
 
+  // ============================================================
+  // VYENFITA ROUTE DETECTION
+  // ============================================================
+  // When the URL is /vyenfita/*, we bypass Appsmith's header,
+  // walkthrough, and product alert banner to give VYENFITA a
+  // clean, full-screen experience.
+  // ============================================================
+  const isVYENFITARoute =
+    typeof window !== "undefined" &&
+    window.location.pathname.startsWith(VYENFITA_BASE_PATH);
+
   return (
     <Router history={history}>
       <Suspense fallback={loadingIndicator}>
@@ -185,7 +222,11 @@ export default function AppRouter() {
             <ErrorPageHeader />
             <ErrorPage code={safeCrashCode} />
           </>
+        ) : isVYENFITARoute ? (
+          // VYENFITA — isolated layout (no Appsmith header/walkthrough)
+          <Routes />
         ) : (
+          // Appsmith — normal layout
           <>
             <RouteChangeListener />
             <Walkthrough>
@@ -198,4 +239,4 @@ export default function AppRouter() {
       </Suspense>
     </Router>
   );
-}
+  }
