@@ -2,10 +2,6 @@
  * VYENFITA Plugin Manager
  * 
  * Manages plugins for VYENFITA platform
- * - Load plugins
- * - Register plugins
- * - Execute plugin hooks
- * - Manage plugin lifecycle
  * 
  * @version 1.0.0
  */
@@ -27,7 +23,17 @@ export interface Plugin {
 
 export interface PluginHook {
   id: string;
-  type: 'before_generation' | 'after_generation' | 'before_validation' | 'after_validation' | 'before_workflow' | 'after_workflow' | 'before_bi' | 'after_bi' | 'before_versioning' | 'after_versioning';
+  type:
+    | 'before_generation'
+    | 'after_generation'
+    | 'before_validation'
+    | 'after_validation'
+    | 'before_workflow'
+    | 'after_workflow'
+    | 'before_bi'
+    | 'after_bi'
+    | 'before_versioning'
+    | 'after_versioning';
   name: string;
   handler: (data: any) => Promise<any>;
   priority: number;
@@ -54,25 +60,29 @@ export class PluginManager {
   constructor() {
     this.plugins = new Map();
     this.hookRegistry = new Map();
-    
-    // Initialize hook registry
+
     const hookTypes: PluginHook['type'][] = [
-      'before_generation', 'after_generation',
-      'before_validation', 'after_validation',
-      'before_workflow', 'after_workflow',
-      'before_bi', 'after_bi',
-      'before_versioning', 'after_versioning'
+      'before_generation',
+      'after_generation',
+      'before_validation',
+      'after_validation',
+      'before_workflow',
+      'after_workflow',
+      'before_bi',
+      'after_bi',
+      'before_versioning',
+      'after_versioning',
     ];
-    
-    for (const type of hookTypes) {
-      this.hookRegistry.set(type, []);
+
+    for (const hookType of hookTypes) {
+      this.hookRegistry.set(hookType, []);
     }
   }
 
-  /**
-   * Register a plugin
-   */
-  registerPlugin(manifest: PluginManifest, config: Record<string, any> = {}): Plugin {
+  registerPlugin(
+    manifest: PluginManifest,
+    config: Record<string, any> = {}
+  ): Plugin {
     const plugin: Plugin = {
       id: manifest.id,
       name: manifest.name,
@@ -86,17 +96,13 @@ export class PluginManager {
       updatedAt: new Date(),
     };
 
-    // Register hooks
     for (const hookDef of manifest.hooks) {
-      // In production, this would dynamically import the handler
-      // For now, we'll create a placeholder
       const hook: PluginHook = {
         id: uuidv4(),
         type: hookDef.type,
         name: hookDef.name,
         priority: hookDef.priority,
         handler: async (data: any) => {
-          // Placeholder - in production, this would call the actual plugin code
           return { ...data, plugin: plugin.id };
         },
       };
@@ -105,7 +111,7 @@ export class PluginManager {
     }
 
     // Sort hooks by priority
-    for (const [type, hooks] of this.hookRegistry) {
+    for (const hooks of this.hookRegistry.values()) {
       hooks.sort((a, b) => a.priority - b.priority);
     }
 
@@ -113,18 +119,14 @@ export class PluginManager {
     return plugin;
   }
 
-  /**
-   * Unregister a plugin
-   */
   unregisterPlugin(pluginId: string): boolean {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return false;
 
-    // Remove all hooks
     for (const hook of plugin.hooks) {
       const hooks = this.hookRegistry.get(hook.type);
       if (hooks) {
-        const index = hooks.findIndex(h => h.id === hook.id);
+        const index = hooks.findIndex((h) => h.id === hook.id);
         if (index !== -1) {
           hooks.splice(index, 1);
         }
@@ -134,9 +136,6 @@ export class PluginManager {
     return this.plugins.delete(pluginId);
   }
 
-  /**
-   * Execute hooks for a specific type
-   */
   async executeHooks(type: PluginHook['type'], data: any): Promise<any> {
     const hooks = this.hookRegistry.get(type) || [];
     let result = data;
@@ -146,30 +145,20 @@ export class PluginManager {
         result = await hook.handler(result);
       } catch (error) {
         console.error(`Hook execution failed: ${hook.name}`, error);
-        // Continue with other hooks
       }
     }
 
     return result;
   }
 
-  /**
-   * Get all plugins
-   */
   getPlugins(): Plugin[] {
     return Array.from(this.plugins.values());
   }
 
-  /**
-   * Get a specific plugin
-   */
   getPlugin(id: string): Plugin | undefined {
     return this.plugins.get(id);
   }
 
-  /**
-   * Enable a plugin
-   */
   enablePlugin(id: string): boolean {
     const plugin = this.plugins.get(id);
     if (!plugin) return false;
@@ -178,9 +167,6 @@ export class PluginManager {
     return true;
   }
 
-  /**
-   * Disable a plugin
-   */
   disablePlugin(id: string): boolean {
     const plugin = this.plugins.get(id);
     if (!plugin) return false;
@@ -189,9 +175,6 @@ export class PluginManager {
     return true;
   }
 
-  /**
-   * Update plugin configuration
-   */
   updatePluginConfig(id: string, config: Record<string, any>): boolean {
     const plugin = this.plugins.get(id);
     if (!plugin) return false;
@@ -199,4 +182,4 @@ export class PluginManager {
     plugin.updatedAt = new Date();
     return true;
   }
-}
+          }
