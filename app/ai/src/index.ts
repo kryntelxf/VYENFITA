@@ -1,7 +1,7 @@
 /**
  * VYENFITA AI Service - Entry Point
  * 
- * @version 3.0.0
+ * @version 4.0.0
  */
 
 import express from 'express';
@@ -23,6 +23,8 @@ import { createEnterpriseRouter } from './routes/enterprise.routes';
 import { createDeploymentRouter } from './routes/deployment.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import { createAgentRouter } from './routes/agent.routes';
+import { createTriggerRouter } from './routes/trigger.routes';
+import { createWebhookReceiverRouter } from './routes/webhook.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -36,6 +38,7 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 // ============================================================
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
+import { getSchedulerService } from './lib/workflow/scheduler.service';
 import { logger } from './lib/observability/logger';
 import { HealthService } from './lib/observability/health.service';
 
@@ -68,7 +71,7 @@ logger.info(`Auth keys: ${apiKeys.length > 0 ? 'enabled' : 'disabled (dev mode)'
 // INITIALIZE WORKFLOW ENGINE (legacy — kept for backward compat)
 // ============================================================
 
-const workflowEngine = new WorkflowEngine(logger);
+const workflowEngine = new WorkflowEngine();
 logger.info('Legacy Workflow Engine initialized');
 
 // ============================================================
@@ -136,6 +139,10 @@ app.use('/', createObservabilityRouter());
 // Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
 
+// Webhook receiver — public but HMAC-verified
+// /api/v1/webhooks/inbound/*
+app.use('/api/v1/webhooks', createWebhookReceiverRouter());
+
 // ============================================================
 // PROTECTED ROUTES (auth + tenant isolation)
 // ============================================================
@@ -165,6 +172,9 @@ app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter())
 
 // AI Agents (Requirement, Architecture, Testing, Code Review)
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
+
+// Triggers & Approvals (mounted under /api/v1 to allow /workflows/:id/triggers)
+app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -218,7 +228,7 @@ const server = app.listen(port, host, () => {
     host,
     port,
     environment: process.env.NODE_ENV || 'development',
-    version: process.env.SERVICE_VERSION || '3.0.0',
+    version: process.env.SERVICE_VERSION || '4.0.0',
   });
 
   logger.info('📍 Endpoints:', {
@@ -237,7 +247,26 @@ const server = app.listen(port, host, () => {
     enterprise: '/api/v1/enterprise',
     deployments: '/api/v1/deployments',
     agents: '/api/v1/agents',
+    triggers: '/api/v1/workflows/:id/triggers',
+    approvals: '/api/v1/approvals',
+    webhooksInbound: '/api/v1/webhooks/inbound/*',
   });
+
+  // ============================================================
+  // START SCHEDULER
+  // ============================================================
+  try {
+    const scheduler = getSchedulerService();
+    scheduler.start();
+    logger.info('⏰ Scheduler started', {
+      pollIntervalMs: process.env.SCHEDULER_POLL_INTERVAL_MS || '30000',
+      enabled: process.env.SCHEDULER_ENABLED !== 'false',
+    });
+  } catch (error) {
+    logger.error('Failed to start scheduler', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 });
 
 // ============================================================
@@ -255,7 +284,18 @@ const shutdown = async (signal: string) => {
   isShuttingDown = true;
   logger.info(`${signal} received, shutting down gracefully...`);
 
-  // Cleanup workflow engine
+  // Stop scheduler
+  try {
+    const scheduler = getSchedulerService();
+    scheduler.stop();
+    logger.info('Scheduler stopped');
+  } catch (error) {
+    logger.warn('Error stopping scheduler', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+  }
+
+  // Cleanup legacy workflow engine
   if (workflowEngine) {
     try {
       workflowEngine.cleanup();
