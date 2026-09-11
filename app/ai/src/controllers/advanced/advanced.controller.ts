@@ -26,10 +26,6 @@ export class AdvancedController {
   // USER MANAGEMENT
   // ============================================================
 
-  /**
-   * Create user
-   * POST /api/v1/advanced/users
-   */
   async createUser(req: Request, res: Response): Promise<void> {
     try {
       const { email, password, name, tenantId, role } = req.body;
@@ -44,7 +40,6 @@ export class AdvancedController {
 
       const user = await userManagementService.createUser(email, password, name, tenantId, role);
 
-      // Remove password from response
       const { password: _, ...userWithoutPassword } = user;
 
       res.json({
@@ -61,10 +56,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Authenticate user
-   * POST /api/v1/advanced/auth
-   */
   async authenticate(req: Request, res: Response): Promise<void> {
     try {
       const { email, password } = req.body;
@@ -98,10 +89,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get users
-   * GET /api/v1/advanced/users
-   */
   async getUsers(req: Request, res: Response): Promise<void> {
     try {
       const { tenantId } = req.query;
@@ -113,7 +100,6 @@ export class AdvancedController {
         users = userManagementService.getUsers();
       }
 
-      // Remove passwords
       const usersWithoutPasswords = users.map(({ password: _, ...user }) => user);
 
       res.json({
@@ -131,10 +117,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get user by ID
-   * GET /api/v1/advanced/users/:id
-   */
   async getUser(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
@@ -164,11 +146,7 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get roles
-   * GET /api/v1/advanced/roles
-   */
-  async getRoles(req: Request, res: Response): Promise<void> {
+  async getRoles(_req: Request, res: Response): Promise<void> {
     try {
       const roles = userManagementService.getRoles();
 
@@ -191,10 +169,6 @@ export class AdvancedController {
   // WORKSPACE MANAGEMENT
   // ============================================================
 
-  /**
-   * Create workspace
-   * POST /api/v1/advanced/workspaces
-   */
   async createWorkspace(req: Request, res: Response): Promise<void> {
     try {
       const { name, description, ownerId, tenantId, settings } = req.body;
@@ -229,10 +203,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get workspaces
-   * GET /api/v1/advanced/workspaces
-   */
   async getWorkspaces(req: Request, res: Response): Promise<void> {
     try {
       const { userId } = req.query;
@@ -262,10 +232,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Invite user to workspace
-   * POST /api/v1/advanced/workspaces/:workspaceId/invite
-   */
   async inviteUser(req: Request, res: Response): Promise<void> {
     try {
       const { workspaceId } = req.params;
@@ -279,7 +245,12 @@ export class AdvancedController {
         return;
       }
 
-      const invitation = teamCollaborationService.inviteUser(workspaceId, email, role, invitedBy);
+      const invitation = teamCollaborationService.inviteUser(
+        workspaceId,
+        email,
+        role,
+        invitedBy
+      );
 
       res.json({
         success: true,
@@ -295,10 +266,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Accept invitation
-   * POST /api/v1/advanced/invitations/:invitationId/accept
-   */
   async acceptInvitation(req: Request, res: Response): Promise<void> {
     try {
       const { invitationId } = req.params;
@@ -340,10 +307,6 @@ export class AdvancedController {
   // DEPLOYMENT MANAGEMENT
   // ============================================================
 
-  /**
-   * Deploy application
-   * POST /api/v1/advanced/deploy
-   */
   async deployApplication(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId, version, environment, platform, config } = req.body;
@@ -378,10 +341,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get deployments
-   * GET /api/v1/advanced/deployments
-   */
   async getDeployments(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId } = req.query;
@@ -411,10 +370,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Rollback deployment
-   * POST /api/v1/advanced/deployments/:deploymentId/rollback
-   */
   async rollbackDeployment(req: Request, res: Response): Promise<void> {
     try {
       const { deploymentId } = req.params;
@@ -443,10 +398,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get deployment stats
-   * GET /api/v1/advanced/deployments/stats
-   */
   async getDeploymentStats(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId } = req.query;
@@ -479,10 +430,6 @@ export class AdvancedController {
   // SECURITY SCANNER
   // ============================================================
 
-  /**
-   * Run security scan
-   * POST /api/v1/advanced/security/scan
-   */
   async runSecurityScan(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId, type } = req.body;
@@ -511,10 +458,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get security scans
-   * GET /api/v1/advanced/security/scans
-   */
   async getSecurityScans(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId } = req.query;
@@ -544,10 +487,6 @@ export class AdvancedController {
     }
   }
 
-  /**
-   * Get latest security scan
-   * GET /api/v1/advanced/security/latest
-   */
   async getLatestSecurityScan(req: Request, res: Response): Promise<void> {
     try {
       const { applicationId } = req.query;
@@ -583,4 +522,4 @@ export class AdvancedController {
       });
     }
   }
-                                                          }
+  }
