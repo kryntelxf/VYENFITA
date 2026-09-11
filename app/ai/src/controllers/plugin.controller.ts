@@ -47,7 +47,7 @@ export class PluginController {
    * Get all plugins
    * GET /api/v1/plugins
    */
-  async getAll(req: Request, res: Response): Promise<void> {
+  async getAll(_req: Request, res: Response): Promise<void> {
     try {
       const plugins = pluginManager.getPlugins();
 
@@ -218,4 +218,4 @@ export class PluginController {
       });
     }
   }
-  }
+}
