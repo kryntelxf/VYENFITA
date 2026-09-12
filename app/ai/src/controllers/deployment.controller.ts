@@ -1,7 +1,7 @@
 /**
  * VYENFITA Deployment Controller
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { Request, Response } from 'express';
@@ -10,8 +10,32 @@ import { prisma } from '../lib/database/client';
 
 export class DeploymentController {
   /**
+   * List available deployment target types
+   * GET /api/v1/deployments/targets
+   * 
+   * MUST be defined before /deployments/:deploymentId to avoid collision
+   */
+  async listTargets(_req: Request, res: Response): Promise<void> {
+    try {
+      const service = getDeploymentService();
+      const targets = service.listAvailableTargets();
+
+      res.json({
+        success: true,
+        data: targets,
+        count: targets.length,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to list targets',
+      });
+    }
+  }
+
+  /**
    * Deploy application
-   * POST /api/v1/applications/:id/deployments
+   * POST /api/v1/deployments/applications/:id/deployments
    */
   async deploy(req: Request, res: Response): Promise<void> {
     try {
@@ -63,7 +87,8 @@ export class DeploymentController {
       const isUserError =
         isNotFound ||
         message.includes('No driver') ||
-        message.includes('required');
+        message.includes('required') ||
+        message.includes('Invalid');
 
       res.status(isNotFound ? 404 : isUserError ? 400 : 500).json({
         success: false,
@@ -74,7 +99,7 @@ export class DeploymentController {
 
   /**
    * List deployments for application
-   * GET /api/v1/applications/:id/deployments
+   * GET /api/v1/deployments/applications/:id/deployments
    */
   async list(req: Request, res: Response): Promise<void> {
     try {
@@ -123,7 +148,7 @@ export class DeploymentController {
 
   /**
    * Get deployment
-   * GET /api/v1/deployments/:deploymentId
+   * GET /api/v1/deployments/deployments/:deploymentId
    */
   async get(req: Request, res: Response): Promise<void> {
     try {
@@ -152,7 +177,7 @@ export class DeploymentController {
 
   /**
    * Rollback deployment
-   * POST /api/v1/deployments/:deploymentId/rollback
+   * POST /api/v1/deployments/deployments/:deploymentId/rollback
    */
   async rollback(req: Request, res: Response): Promise<void> {
     try {
@@ -184,7 +209,7 @@ export class DeploymentController {
 
   /**
    * Remove deployment
-   * DELETE /api/v1/deployments/:deploymentId
+   * DELETE /api/v1/deployments/deployments/:deploymentId
    */
   async remove(req: Request, res: Response): Promise<void> {
     try {
@@ -205,4 +230,4 @@ export class DeploymentController {
       });
     }
   }
-        }
+    }
