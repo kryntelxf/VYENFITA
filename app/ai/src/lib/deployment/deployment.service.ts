@@ -1,19 +1,19 @@
 /**
  * VYENFITA Deployment Service
  * 
- * Production-grade deployment orchestration
+ * Production-grade deployment orchestration:
+ * - Uses DriverRegistry to select driver
  * - Build → Deploy → Verify
  * - Rollback on failure
- * - Persistent state
- * - Audit logging
+ * - Persistent state + audit
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { prisma } from '../database/client';
 import { auditService } from '../audit/audit.service';
 import { BuildService } from './build.service';
-import { DockerDriver } from './drivers/docker.driver';
+import { getDriverRegistry } from './driver-registry';
 import {
   DeploymentDriver,
   DeploymentLogEntry,
@@ -21,16 +21,7 @@ import {
   DeployResult,
   HealthCheckResult,
 } from './deployment.interface';
-import winston from 'winston';
-
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [new winston.transports.Console()],
-});
+import { logger } from '../observability/logger';
 
 export interface CreateDeploymentParams {
   tenantId: string;
@@ -47,18 +38,11 @@ export interface CreateDeploymentParams {
 }
 
 export class DeploymentService {
-  private drivers: Map<string, DeploymentDriver> = new Map();
-
-  constructor() {
-    // Register drivers
-    this.drivers.set('docker', new DockerDriver());
-  }
-
   /**
    * Create and execute a deployment
    */
   async deploy(params: CreateDeploymentParams): Promise<DeployResult> {
-    // Verify application belongs to tenant
+    // Verify application
     const application = await prisma.application.findFirst({
       where: {
         id: params.applicationId,
@@ -95,10 +79,26 @@ export class DeploymentService {
       throw new Error('Version not found');
     }
 
-    // Get driver
-    const driver = this.drivers.get(params.target.type);
+    // Get driver from registry
+    const registry = getDriverRegistry();
+    const driver = registry.get(params.target.type);
+
     if (!driver) {
-      throw new Error(`No driver registered for type: ${params.target.type}`);
+      throw new Error(
+        `No driver registered for type: ${params.target.type}. Available: ${registry.list().join(', ')}`
+      );
+    }
+
+    // Validate driver config
+    const validation = driver.validate({
+      id: params.target.name,
+      type: params.target.type as any,
+      name: params.target.name,
+      config: params.target.config,
+    });
+
+    if (!validation.valid) {
+      throw new Error(`Invalid target config: ${validation.errors.join(', ')}`);
     }
 
     // Create deployment record
@@ -126,15 +126,14 @@ export class DeploymentService {
     };
 
     try {
-      // Update status
+      // ============================================================
+      // STEP 1: Build
+      // ============================================================
       await prisma.deployment.update({
         where: { id: deployment.id },
         data: { status: 'building' },
       });
 
-      // ============================================================
-      // STEP 1: BUILD
-      // ============================================================
       const artifact = await BuildService.build(
         {
           applicationId: params.applicationId,
@@ -152,15 +151,14 @@ export class DeploymentService {
         data: { artifactId: artifact.id, checksum: artifact.checksum },
       });
 
-      // Update status
+      // ============================================================
+      // STEP 2: Deploy
+      // ============================================================
       await prisma.deployment.update({
         where: { id: deployment.id },
         data: { status: 'deploying' },
       });
 
-      // ============================================================
-      // STEP 2: DEPLOY
-      // ============================================================
       const deployRequest: DeployRequest = {
         tenantId: params.tenantId,
         applicationId: params.applicationId,
@@ -179,7 +177,6 @@ export class DeploymentService {
       const result = await driver.deploy(artifact, deployRequest, log);
 
       if (!result.success) {
-        // Failed deployment
         await prisma.deployment.update({
           where: { id: deployment.id },
           data: {
@@ -200,6 +197,7 @@ export class DeploymentService {
           resourceId: deployment.id,
           details: {
             applicationId: params.applicationId,
+            target: params.target.type,
             error: result.error,
           },
           status: 'error',
@@ -210,7 +208,7 @@ export class DeploymentService {
       }
 
       // ============================================================
-      // STEP 3: VERIFY (health check)
+      // STEP 3: Verify (health check with retry)
       // ============================================================
       log({
         timestamp: new Date(),
@@ -225,7 +223,6 @@ export class DeploymentService {
         timestamp: new Date(),
       };
 
-      // Retry health check up to 3 times
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           health = await driver.healthCheck(result.url || '', 10000);
@@ -238,9 +235,7 @@ export class DeploymentService {
           });
         }
 
-        if (attempt < 3) {
-          await this.sleep(2000);
-        }
+        if (attempt < 3) await this.sleep(2000);
       }
 
       log({
@@ -250,7 +245,6 @@ export class DeploymentService {
         data: { healthy: health.healthy, status: health.status },
       });
 
-      // Determine final status
       const finalStatus = health.healthy ? 'success' : 'degraded';
 
       await prisma.deployment.update({
@@ -275,6 +269,7 @@ export class DeploymentService {
         details: {
           applicationId: params.applicationId,
           environmentId: params.environmentId,
+          target: params.target.type,
           healthStatus: health.status,
           durationMs: result.durationMs,
         },
@@ -331,7 +326,7 @@ export class DeploymentService {
       throw new Error('Deployment not found');
     }
 
-    // Find previous successful deployment for same application + environment
+    // Find previous successful deployment for same app + env
     const previous = await prisma.deployment.findFirst({
       where: {
         tenantId,
@@ -381,7 +376,9 @@ export class DeploymentService {
       throw new Error('Deployment not found');
     }
 
-    const driver = this.drivers.get(deployment.platform);
+    const registry = getDriverRegistry();
+    const driver = registry.get(deployment.platform);
+
     if (driver) {
       try {
         await driver.remove(deployment.id, (deployment.config as any).target);
@@ -402,6 +399,13 @@ export class DeploymentService {
     });
   }
 
+  /**
+   * List available deployment targets
+   */
+  listAvailableTargets(): string[] {
+    return getDriverRegistry().list();
+  }
+
   // ============================================================
   // PRIVATE
   // ============================================================
@@ -418,4 +422,4 @@ export function getDeploymentService(): DeploymentService {
     serviceInstance = new DeploymentService();
   }
   return serviceInstance;
-      }
+}
