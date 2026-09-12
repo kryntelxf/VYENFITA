@@ -25,6 +25,7 @@ import { createObservabilityRouter } from './routes/observability.routes';
 import { createAgentRouter } from './routes/agent.routes';
 import { createTriggerRouter } from './routes/trigger.routes';
 import { createWebhookReceiverRouter } from './routes/webhook.routes';
+import { createBIRouter } from './routes/bi.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -38,9 +39,9 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 // ============================================================
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
-import { getSchedulerService } from './lib/workflow/scheduler.service';
 import { logger } from './lib/observability/logger';
 import { HealthService } from './lib/observability/health.service';
+import { getSchedulerService } from './lib/workflow/scheduler.service';
 
 // ============================================================
 // ENV
@@ -139,8 +140,7 @@ app.use('/', createObservabilityRouter());
 // Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
 
-// Webhook receiver — public but HMAC-verified
-// /api/v1/webhooks/inbound/*
+// Webhook receiver (public, HMAC-verified internally)
 app.use('/api/v1/webhooks', createWebhookReceiverRouter());
 
 // ============================================================
@@ -173,8 +173,11 @@ app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter())
 // AI Agents (Requirement, Architecture, Testing, Code Review)
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
 
-// Triggers & Approvals (mounted under /api/v1 to allow /workflows/:id/triggers)
+// Triggers + Approvals
 app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
+
+// Business Intelligence (NL to SQL, Anomaly Detection, Chart Recommend)
+app.use('/api/v1/bi', ...protectedMiddleware, createBIRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -249,24 +252,16 @@ const server = app.listen(port, host, () => {
     agents: '/api/v1/agents',
     triggers: '/api/v1/workflows/:id/triggers',
     approvals: '/api/v1/approvals',
-    webhooksInbound: '/api/v1/webhooks/inbound/*',
+    webhooks: '/api/v1/webhooks/inbound/*',
+    businessIntelligence: '/api/v1/bi',
   });
 
   // ============================================================
   // START SCHEDULER
   // ============================================================
-  try {
-    const scheduler = getSchedulerService();
-    scheduler.start();
-    logger.info('⏰ Scheduler started', {
-      pollIntervalMs: process.env.SCHEDULER_POLL_INTERVAL_MS || '30000',
-      enabled: process.env.SCHEDULER_ENABLED !== 'false',
-    });
-  } catch (error) {
-    logger.error('Failed to start scheduler', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
+  const scheduler = getSchedulerService();
+  scheduler.start();
+  logger.info('⏰ Workflow Scheduler started');
 });
 
 // ============================================================
@@ -295,7 +290,7 @@ const shutdown = async (signal: string) => {
     });
   }
 
-  // Cleanup legacy workflow engine
+  // Cleanup workflow engine
   if (workflowEngine) {
     try {
       workflowEngine.cleanup();
