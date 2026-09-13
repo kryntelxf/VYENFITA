@@ -8,7 +8,7 @@
  * - Error tracking
  * - User behavior
  * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -82,9 +82,6 @@ export class ApplicationAnalyticsService {
     this.events = new Map();
   }
 
-  /**
-   * Record an application event
-   */
   recordEvent(
     applicationId: string,
     tenantId: string,
@@ -108,16 +105,16 @@ export class ApplicationAnalyticsService {
 
     this.events.set(event.id, event);
 
-    // Update analytics
     this.updateAnalytics(applicationId, tenantId, event);
 
     return event;
   }
 
-  /**
-   * Update analytics with new event
-   */
-  private updateAnalytics(applicationId: string, tenantId: string, event: ApplicationEvent): void {
+  private updateAnalytics(
+    applicationId: string,
+    tenantId: string,
+    event: ApplicationEvent
+  ): void {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
     const key = `${applicationId}-${date.toISOString()}`;
@@ -151,7 +148,6 @@ export class ApplicationAnalyticsService {
       };
     }
 
-    // Update metrics based on event type
     switch (event.type) {
       case 'session':
         analytics.metrics.sessions.total++;
@@ -183,7 +179,6 @@ export class ApplicationAnalyticsService {
         break;
     }
 
-    // Update users
     const userIds = new Set<string>();
     for (const e of analytics.events) {
       userIds.add(e.userId);
@@ -191,7 +186,6 @@ export class ApplicationAnalyticsService {
     userIds.add(event.userId);
     analytics.metrics.users.total = userIds.size;
 
-    // Update active users (events in last 24 hours)
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const activeUsers = new Set<string>();
     for (const e of analytics.events) {
@@ -201,20 +195,15 @@ export class ApplicationAnalyticsService {
     }
     analytics.metrics.users.active = activeUsers.size;
 
-    // Update summary
     analytics.summary = this.calculateSummary(analytics);
 
     analytics.events.push(event);
     this.analytics.set(key, analytics);
   }
 
-  /**
-   * Calculate summary from analytics
-   */
   private calculateSummary(analytics: ApplicationAnalytics): ApplicationSummary {
     const metrics = analytics.metrics;
 
-    // Calculate engagement score (0-100)
     const engagementScore = Math.min(
       100,
       Math.max(0,
@@ -239,9 +228,6 @@ export class ApplicationAnalyticsService {
     };
   }
 
-  /**
-   * Get analytics for an application
-   */
   getAnalytics(applicationId: string, date?: Date): ApplicationAnalytics[] {
     const result: ApplicationAnalytics[] = [];
 
@@ -262,9 +248,6 @@ export class ApplicationAnalyticsService {
     return result.sort((a, b) => a.date.getTime() - b.date.getTime());
   }
 
-  /**
-   * Get analytics summary for a tenant
-   */
   getTenantAnalytics(tenantId: string): {
     totalApplications: number;
     totalUsers: number;
@@ -302,13 +285,13 @@ export class ApplicationAnalyticsService {
       }
 
       const app = appMap.get(analytics.applicationId)!;
-      app.users.add(analytics.metrics.users.total);
+      app.users.add(analytics.metrics.users.total.toString());
       app.events += analytics.events.length;
       app.totalEngagement += analytics.summary.engagementScore;
       app.count++;
     }
 
-    const byApplication = Array.from(appMap.values()).map(app => ({
+    const byApplication = Array.from(appMap.values()).map((app) => ({
       applicationId: app.applicationId,
       name: app.name,
       users: app.users.size,
@@ -337,9 +320,6 @@ export class ApplicationAnalyticsService {
     };
   }
 
-  /**
-   * Get events for an application
-   */
   getEvents(
     applicationId: string,
     filter?: {
@@ -354,27 +334,25 @@ export class ApplicationAnalyticsService {
 
     for (const event of this.events.values()) {
       const analytics = this.getAnalytics(applicationId);
-      const hasAnalytics = analytics.some(a => a.events.includes(event));
+      const hasAnalytics = analytics.some((a) => a.events.includes(event));
       if (hasAnalytics) {
         result.push(event);
       }
     }
 
-    // Apply filters
     if (filter?.type) {
-      result = result.filter(e => e.type === filter.type);
+      result = result.filter((e) => e.type === filter.type);
     }
     if (filter?.userId) {
-      result = result.filter(e => e.userId === filter.userId);
+      result = result.filter((e) => e.userId === filter.userId);
     }
     if (filter?.startDate) {
-      result = result.filter(e => e.timestamp >= filter.startDate!);
+      result = result.filter((e) => e.timestamp >= filter.startDate!);
     }
     if (filter?.endDate) {
-      result = result.filter(e => e.timestamp <= filter.endDate!);
+      result = result.filter((e) => e.timestamp <= filter.endDate!);
     }
 
-    // Sort by timestamp (newest first)
     result = result.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
     if (filter?.limit) {
@@ -386,15 +364,25 @@ export class ApplicationAnalyticsService {
 
   /**
    * Get user journey for an application
+   * 
+   * @param applicationId - Application ID
+   * @param userId - User ID (number or string, will be converted to string)
+   * @param limit - Maximum number of journeys to return
    */
-  getUserJourney(applicationId: string, userId: string, limit: number = 50): {
+  getUserJourney(
+    applicationId: string,
+    userId: string | number,
+    limit: number = 50
+  ): {
     sessionId: string;
     events: ApplicationEvent[];
     startTime: Date;
     endTime: Date;
     duration: number;
   }[] {
-    const events = this.getEvents(applicationId, { userId });
+    // FIX: Convert userId to string to prevent type mismatch
+    const userIdStr = String(userId);
+    const events = this.getEvents(applicationId, { userId: userIdStr });
     const sessionMap = new Map<string, ApplicationEvent[]>();
 
     for (const event of events) {
@@ -413,7 +401,9 @@ export class ApplicationAnalyticsService {
     }[] = [];
 
     for (const [sessionId, sessionEvents] of sessionMap) {
-      const sorted = sessionEvents.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      const sorted = sessionEvents.sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+      );
       const startTime = sorted[0]?.timestamp || new Date();
       const endTime = sorted[sorted.length - 1]?.timestamp || new Date();
 
@@ -430,4 +420,4 @@ export class ApplicationAnalyticsService {
       .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
       .slice(0, limit);
   }
-}
+    }
