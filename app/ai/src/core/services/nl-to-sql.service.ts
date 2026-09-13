@@ -1,12 +1,7 @@
 /**
  * VYENFITA Natural Language to SQL Service
  * 
- * Converts natural language questions to SQL queries
- * - Supports multiple database types
- * - Query validation
- * - Query optimization suggestions
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { AIService } from './ai.service';
@@ -31,6 +26,20 @@ export interface SQLGenerationResult {
   };
 }
 
+export interface TableSchema {
+  name: string;
+  fields: {
+    name: string;
+    type: string;
+    nullable?: boolean;
+    primaryKey?: boolean;
+    foreignKey?: {
+      table: string;
+      field: string;
+    };
+  }[];
+}
+
 export class NaturalLanguageToSQLService {
   private aiService: AIService;
 
@@ -38,9 +47,6 @@ export class NaturalLanguageToSQLService {
     this.aiService = aiService;
   }
 
-  /**
-   * Convert natural language to SQL
-   */
   async convertToSQL(
     question: string,
     schema: { tables: TableSchema[] },
@@ -63,10 +69,10 @@ export class NaturalLanguageToSQLService {
     return this.parseResponse(response.choices[0].message.content, databaseType);
   }
 
-  /**
-   * Validate SQL query
-   */
-  validateSQL(query: string, databaseType: 'postgresql' | 'mysql' | 'mongodb' | 'sqlite'): {
+  validateSQL(
+    query: string,
+    databaseType: 'postgresql' | 'mysql' | 'mongodb' | 'sqlite'
+  ): {
     isValid: boolean;
     errors: string[];
     warnings: string[];
@@ -74,28 +80,29 @@ export class NaturalLanguageToSQLService {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Basic validation
     const upperQuery = query.toUpperCase();
 
-    // Check for dangerous operations
-    if (upperQuery.includes('DROP') || upperQuery.includes('DELETE') || upperQuery.includes('TRUNCATE')) {
+    if (
+      upperQuery.includes('DROP') ||
+      upperQuery.includes('DELETE') ||
+      upperQuery.includes('TRUNCATE')
+    ) {
       errors.push('Query contains destructive operations. Only SELECT queries are allowed.');
     }
 
-    // Check for SQL injection patterns
     if (query.includes(';') && query.split(';').length > 2) {
       warnings.push('Multiple statements detected. Ensure this is intentional.');
     }
 
-    // Check for SELECT clause
     if (!upperQuery.includes('SELECT')) {
       errors.push('Query must be a SELECT statement.');
     }
 
-    // Check for FROM clause
     if (!upperQuery.includes('FROM')) {
       errors.push('Query must include a FROM clause.');
     }
+
+    void databaseType; // Reserved for future dialect-specific checks
 
     return {
       isValid: errors.length === 0,
@@ -106,29 +113,31 @@ export class NaturalLanguageToSQLService {
 
   /**
    * Optimize SQL query
+   * 
+   * @param query - SQL query to optimize
+   * @param _databaseType - Database type (reserved for future dialect-specific optimizations)
    */
-  optimizeSQL(query: string): { suggestions: string[]; estimatedPerformance: string } {
+  optimizeSQL(
+    query: string,
+    _databaseType: string
+  ): { suggestions: string[]; estimatedPerformance: string } {
     const suggestions: string[] = [];
     let estimatedPerformance = 'unknown';
 
     const upperQuery = query.toUpperCase();
 
-    // Check for SELECT *
     if (upperQuery.includes('SELECT *')) {
       suggestions.push('Consider specifying only the columns you need instead of SELECT *');
     }
 
-    // Check for missing WHERE clause
     if (!upperQuery.includes('WHERE') && !upperQuery.includes('LIMIT')) {
       suggestions.push('Consider adding a WHERE clause or LIMIT to reduce result set');
     }
 
-    // Check for JOIN without conditions
     if (upperQuery.includes('JOIN') && !upperQuery.includes('ON')) {
       suggestions.push('JOIN statements should include ON conditions');
     }
 
-    // Estimate performance
     if (suggestions.length === 0) {
       estimatedPerformance = 'good';
     } else if (suggestions.length <= 2) {
@@ -175,13 +184,12 @@ Output must be a valid JSON with this structure:
 
       const parsed = JSON.parse(jsonMatch[0]);
 
-      // Validate the query
-      const validation = this.validateSQL(parsed.query, databaseType);
-      const optimization = this.optimizeSQL(parsed.query);
+      const validation = this.validateSQL(parsed.query, databaseType as any);
+      const optimization = this.optimizeSQL(parsed.query, databaseType);
 
       return {
         query: parsed.query || '',
-        databaseType,
+        databaseType: databaseType as any,
         explanation: parsed.explanation || '',
         confidence: parsed.confidence || 0.8,
         tables: parsed.tables || [],
@@ -194,18 +202,4 @@ Output must be a valid JSON with this structure:
       throw new Error(`Failed to parse SQL generation: ${error}`);
     }
   }
-}
-
-export interface TableSchema {
-  name: string;
-  fields: {
-    name: string;
-    type: string;
-    nullable?: boolean;
-    primaryKey?: boolean;
-    foreignKey?: {
-      table: string;
-      field: string;
-    };
-  }[];
   }
