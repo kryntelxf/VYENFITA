@@ -1,16 +1,7 @@
 /**
  * VYENFITA Compliance Manager Service
  * 
- * Manages compliance requirements
- * - GDPR compliance
- * - SOC2 compliance
- * - HIPAA compliance
- * - ISO 27001 compliance
- * - Data privacy
- * - Data retention
- * - Audit trail
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -101,15 +92,10 @@ export class ComplianceManagerService {
     this.policies = new Map();
     this.consents = new Map();
 
-    // Initialize default frameworks
     this.initializeDefaultFrameworks();
   }
 
-  /**
-   * Initialize default compliance frameworks
-   */
   private initializeDefaultFrameworks(): void {
-    // GDPR
     const gdpr: ComplianceFramework = {
       id: 'gdpr',
       name: 'GDPR',
@@ -157,7 +143,6 @@ export class ComplianceManagerService {
     };
     this.frameworks.set('gdpr', gdpr);
 
-    // SOC2
     const soc2: ComplianceFramework = {
       id: 'soc2',
       name: 'SOC2',
@@ -197,23 +182,14 @@ export class ComplianceManagerService {
     this.frameworks.set('soc2', soc2);
   }
 
-  /**
-   * Get all compliance frameworks
-   */
   getFrameworks(): ComplianceFramework[] {
     return Array.from(this.frameworks.values());
   }
 
-  /**
-   * Get a specific framework
-   */
   getFramework(id: string): ComplianceFramework | undefined {
     return this.frameworks.get(id);
   }
 
-  /**
-   * Update a framework requirement
-   */
   updateRequirement(
     frameworkId: string,
     requirementId: string,
@@ -222,20 +198,15 @@ export class ComplianceManagerService {
     const framework = this.frameworks.get(frameworkId);
     if (!framework) return false;
 
-    const requirement = framework.requirements.find(r => r.id === requirementId);
+    const requirement = framework.requirements.find((r) => r.id === requirementId);
     if (!requirement) return false;
 
     Object.assign(requirement, updates);
-
-    // Update framework status
     this.updateFrameworkStatus(frameworkId);
 
     return true;
   }
 
-  /**
-   * Add evidence to a requirement
-   */
   addEvidence(
     frameworkId: string,
     requirementId: string,
@@ -244,7 +215,7 @@ export class ComplianceManagerService {
     const framework = this.frameworks.get(frameworkId);
     if (!framework) return false;
 
-    const requirement = framework.requirements.find(r => r.id === requirementId);
+    const requirement = framework.requirements.find((r) => r.id === requirementId);
     if (!requirement) return false;
 
     const newEvidence: ComplianceEvidence = {
@@ -258,17 +229,16 @@ export class ComplianceManagerService {
     return true;
   }
 
-  /**
-   * Update framework status based on requirements
-   */
   private updateFrameworkStatus(frameworkId: string): void {
     const framework = this.frameworks.get(frameworkId);
     if (!framework) return;
 
     const requirements = framework.requirements;
     const total = requirements.length;
-    const implemented = requirements.filter(r => r.status === 'implemented' || r.status === 'verified').length;
-    const verified = requirements.filter(r => r.status === 'verified').length;
+    const implemented = requirements.filter(
+      (r) => r.status === 'implemented' || r.status === 'verified'
+    ).length;
+    const verified = requirements.filter((r) => r.status === 'verified').length;
 
     if (verified === total) {
       framework.status = 'compliant';
@@ -283,9 +253,6 @@ export class ComplianceManagerService {
     this.frameworks.set(frameworkId, framework);
   }
 
-  /**
-   * Create a data privacy policy
-   */
   createPrivacyPolicy(
     tenantId: string,
     name: string,
@@ -298,14 +265,8 @@ export class ComplianceManagerService {
       tenantId,
       name,
       description,
-      dataCategories: dataCategories.map(c => ({
-        id: uuidv4(),
-        ...c,
-      })),
-      retentionPeriods: retentionPeriods.map(r => ({
-        id: uuidv4(),
-        ...r,
-      })),
+      dataCategories: dataCategories.map((c) => ({ id: uuidv4(), ...c })),
+      retentionPeriods: retentionPeriods.map((r) => ({ id: uuidv4(), ...r })),
       userConsents: [],
       version: '1.0.0',
       effectiveDate: new Date(),
@@ -316,9 +277,6 @@ export class ComplianceManagerService {
     return policy;
   }
 
-  /**
-   * Get privacy policies
-   */
   getPrivacyPolicies(tenantId: string): DataPrivacyPolicy[] {
     const result: DataPrivacyPolicy[] = [];
     for (const policy of this.policies.values()) {
@@ -329,9 +287,6 @@ export class ComplianceManagerService {
     return result;
   }
 
-  /**
-   * Record user consent
-   */
   recordConsent(
     userId: string,
     purpose: string,
@@ -352,9 +307,6 @@ export class ComplianceManagerService {
     return consent;
   }
 
-  /**
-   * Revoke user consent
-   */
   revokeConsent(consentId: string): boolean {
     const consent = this.consents.get(consentId);
     if (!consent) return false;
@@ -365,9 +317,6 @@ export class ComplianceManagerService {
     return true;
   }
 
-  /**
-   * Get user consents
-   */
   getUserConsents(userId: string): ConsentRecord[] {
     const result: ConsentRecord[] = [];
     for (const consent of this.consents.values()) {
@@ -378,12 +327,13 @@ export class ComplianceManagerService {
     return result;
   }
 
-  /**
-   * Check if a user has active consent
-   */
   hasConsent(userId: string, purpose: string): boolean {
     for (const consent of this.consents.values()) {
-      if (consent.userId === userId && consent.purpose === purpose && consent.status === 'active') {
+      if (
+        consent.userId === userId &&
+        consent.purpose === purpose &&
+        consent.status === 'active'
+      ) {
         return true;
       }
     }
@@ -392,8 +342,10 @@ export class ComplianceManagerService {
 
   /**
    * Get compliance status summary
+   * 
+   * @param _tenantId - Tenant ID (reserved for future per-tenant policies)
    */
-  getComplianceSummary(tenantId: string): {
+  getComplianceSummary(_tenantId: string): {
     totalFrameworks: number;
     compliantFrameworks: number;
     inProgressFrameworks: number;
@@ -402,24 +354,25 @@ export class ComplianceManagerService {
   } {
     const frameworks = Array.from(this.frameworks.values());
     const total = frameworks.length;
-    const compliant = frameworks.filter(f => f.status === 'compliant').length;
-    const inProgress = frameworks.filter(f => f.status === 'in_progress').length;
+    const compliant = frameworks.filter((f) => f.status === 'compliant').length;
+    const inProgress = frameworks.filter((f) => f.status === 'in_progress').length;
 
-    // Calculate completion percentage
     let totalRequirements = 0;
     let completedRequirements = 0;
     for (const framework of frameworks) {
       totalRequirements += framework.requirements.length;
       completedRequirements += framework.requirements.filter(
-        r => r.status === 'implemented' || r.status === 'verified'
+        (r) => r.status === 'implemented' || r.status === 'verified'
       ).length;
     }
 
-    const completionPercentage = totalRequirements > 0
-      ? (completedRequirements / totalRequirements) * 100
-      : 0;
+    const completionPercentage =
+      totalRequirements > 0
+        ? (completedRequirements / totalRequirements) * 100
+        : 0;
 
-    let overallStatus: 'compliant' | 'in_progress' | 'non_compliant' = 'in_progress';
+    let overallStatus: 'compliant' | 'in_progress' | 'non_compliant' =
+      'in_progress';
     if (completedRequirements === totalRequirements && compliant === total) {
       overallStatus = 'compliant';
     } else if (completedRequirements === 0) {
