@@ -1,239 +1,530 @@
-import { AIProviderFactory } from '../providers/provider-factory';
-import {
-  AIProvider,
-  ChatCompletionParams,
-  ChatCompletionResponse,
-  ProviderConfig,
-  HealthCheckResult,
-  StreamChunk,
-  ProviderType,
-} from '../interfaces/ai-provider.interface';
-import { ProviderConfigManager } from '../../config/providers.config';
-import NodeCache from 'node-cache';
-import { v4 as uuidv4 } from 'uuid';
-
 /**
  * VYENFITA AI Service
- * Main service for AI operations with caching, retry, and fallback support
+ * 
+ * @version 2.0.1
  */
-export class AIService {
-  private provider: AIProvider;
-  private config: ProviderConfig;
-  private cache: NodeCache;
-  private readonly providerType: string;
-  private requestId: string;
-  private startTime: number;
 
-  constructor(providerType: string = 'openai') {
-    this.providerType = providerType;
-    const providerConfig = ProviderConfigManager.getConfig(providerType);
-    this.config = providerConfig;
-    this.provider = AIProviderFactory.getProvider(providerType, providerConfig);
-    
-    // Initialize cache
-    this.cache = new NodeCache({
-      stdTTL: parseInt(process.env.AI_CACHE_TTL || '3600'),
-      maxKeys: parseInt(process.env.AI_CACHE_MAX_ITEMS || '1000'),
-      checkperiod: 120,
+import { prisma } from '../../lib/database/client';
+import { auditService } from '../../lib/audit/audit.service';
+import { CircuitBreaker } from '../providers/circuit-breaker';
+import { logger } from '../../lib/observability/logger';
+import { getMetrics } from '../../lib/observability/metrics.service';
+import {
+  AIProvider,
+  AICompletionRequest,
+  AICompletionResponse,
+  AIProviderError,
+  AITimeoutError,
+  AIRateLimitError,
+} from '../interfaces/ai-provider.interface';
+import { OpenAIProvider } from '../providers/openai.provider';
+import { AnthropicProvider } from '../providers/anthropic.provider';
+import { ProviderConfigManager } from '../../config/providers.config';
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export interface AIRequestContext {
+  tenantId: string;
+  userId?: string;
+  operation: string;
+  requestId?: string;
+}
+
+export interface AIServiceConfig {
+  primaryProvider: 'openai' | 'anthropic';
+  maxRetries: number;
+  initialBackoffMs: number;
+  maxBackoffMs: number;
+}
+
+export interface PromptInjectionResult {
+  suspicious: boolean;
+  reason?: string;
+  severity?: 'low' | 'medium' | 'high';
+  matches?: { pattern: string; severity: string }[];
+}
+
+// ============================================================
+// PRICING TABLE (USD per 1M tokens)
+// ============================================================
+
+const PRICING: Record<string, { input: number; output: number }> = {
+  'gpt-4-turbo-preview': { input: 10, output: 30 },
+  'gpt-4': { input: 30, output: 60 },
+  'gpt-4o': { input: 5, output: 15 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
+  'claude-3-opus-20240229': { input: 15, output: 75 },
+  'claude-3-sonnet-20240229': { input: 3, output: 15 },
+  'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
+};
+
+// ============================================================
+// AI SERVICE
+// ============================================================
+
+export class AIService {
+  private providers: Map<string, AIProvider> = new Map();
+  private circuitBreakers: Map<string, CircuitBreaker> = new Map();
+  private config: AIServiceConfig;
+
+  constructor(config?: Partial<AIServiceConfig>) {
+    this.config = {
+      primaryProvider: (process.env.AI_PROVIDER as any) || 'openai',
+      maxRetries: parseInt(process.env.AI_RETRY_ATTEMPTS || '3', 10),
+      initialBackoffMs: parseInt(process.env.AI_RETRY_BACKOFF_MS || '1000', 10),
+      maxBackoffMs: 30000,
+      ...config,
+    };
+
+    this.initializeProviders();
+    this.initializeCircuitBreakers();
+  }
+
+  async complete(
+    request: AICompletionRequest,
+    context: AIRequestContext
+  ): Promise<AICompletionResponse> {
+    const startTime = Date.now();
+    const requestId = context.requestId || this.generateRequestId();
+    const metrics = getMetrics();
+
+    const injectionCheck = this.detectPromptInjection(request);
+
+    if (injectionCheck.suspicious) {
+      logger.warn('Potential prompt injection detected', {
+        requestId,
+        tenantId: context.tenantId,
+        userId: context.userId,
+        reason: injectionCheck.reason,
+        severity: injectionCheck.severity,
+        matches: injectionCheck.matches,
+      });
+
+      await auditService.log({
+        tenantId: context.tenantId,
+        userId: context.userId,
+        eventType: 'security',
+        action: 'prompt_injection_detected',
+        resource: 'ai_request',
+        resourceId: requestId,
+        details: {
+          reason: injectionCheck.reason,
+          severity: injectionCheck.severity,
+          matches: injectionCheck.matches,
+          operation: context.operation,
+        },
+        status: injectionCheck.severity === 'high' ? 'failure' : 'success',
+      });
+
+      metrics.incrementCounter('vyenfita_ai_prompt_injection_total', {
+        tenant: context.tenantId,
+        severity: injectionCheck.severity || 'unknown',
+      });
+
+      if (injectionCheck.severity === 'high') {
+        metrics.incrementCounter('vyenfita_ai_requests_blocked_total', {
+          tenant: context.tenantId,
+          reason: 'prompt_injection',
+        });
+
+        throw new Error(
+          'Request blocked: potential prompt injection detected'
+        );
+      }
+    }
+
+    const providers = this.getProviderOrder();
+
+    let lastError: AIProviderError | undefined;
+    for (const providerName of providers) {
+      const circuit = this.circuitBreakers.get(providerName)!;
+
+      if (!circuit.canAttempt()) {
+        logger.warn(`Circuit breaker OPEN for ${providerName}, skipping`, {
+          requestId,
+          provider: providerName,
+        });
+        metrics.incrementCounter('vyenfita_ai_circuit_skipped_total', {
+          provider: providerName,
+        });
+        continue;
+      }
+
+      try {
+        const result = await this.executeWithRetry(
+          providerName,
+          request,
+          context,
+          requestId
+        );
+
+        circuit.recordSuccess();
+
+        await this.trackUsage(context, result, requestId);
+
+        metrics.incrementCounter('vyenfita_ai_requests_total', {
+          tenant: context.tenantId,
+          provider: result.provider,
+          model: result.model,
+          operation: context.operation,
+          status: 'success',
+        });
+
+        metrics.observeHistogram(
+          'vyenfita_ai_latency_ms',
+          result.latencyMs,
+          {
+            provider: result.provider,
+            model: result.model,
+          }
+        );
+
+        metrics.incrementCounter('vyenfita_ai_tokens_total', {
+          tenant: context.tenantId,
+          provider: result.provider,
+          model: result.model,
+        }, result.usage.totalTokens);
+
+        return result;
+      } catch (error) {
+        const providerError = error as AIProviderError;
+        circuit.recordFailure();
+        lastError = providerError;
+
+        logger.warn(`Provider ${providerName} failed`, {
+          requestId,
+          provider: providerName,
+          code: providerError.code,
+          message: providerError.message,
+        });
+
+        metrics.incrementCounter('vyenfita_ai_errors_total', {
+          tenant: context.tenantId,
+          provider: providerName,
+          code: providerError.code,
+        });
+
+        if (!providerError.retryable && providerError.code === 'AUTH_ERROR') {
+          break;
+        }
+      }
+    }
+
+    const totalLatencyMs = Date.now() - startTime;
+
+    await auditService.log({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      eventType: 'system',
+      action: 'ai_request_failed',
+      resource: 'ai_request',
+      resourceId: requestId,
+      details: {
+        operation: context.operation,
+        error: lastError?.message,
+        code: lastError?.code,
+        latencyMs: totalLatencyMs,
+      },
+      status: 'error',
+      duration: totalLatencyMs,
     });
 
-    this.requestId = uuidv4();
-    this.startTime = Date.now();
+    throw lastError || new Error('All AI providers failed');
   }
 
-  /**
-   * Get the current provider
-   */
-  getProvider(): AIProvider {
-    return this.provider;
-  }
+  async healthCheck(): Promise<{
+    providers: Record<string, { healthy: boolean; latencyMs: number; circuit: string }>;
+    overall: boolean;
+  }> {
+    const results: Record<string, any> = {};
+    let allHealthy = true;
 
-  /**
-   * Get provider type
-   */
-  getProviderType(): string {
-    return this.providerType;
-  }
+    for (const [name, provider] of this.providers) {
+      const health = await provider.healthCheck();
+      const circuit = this.circuitBreakers.get(name);
 
-  /**
-   * Switch to a different provider
-   */
-  switchProvider(providerType: string): void {
-    const newConfig = ProviderConfigManager.getConfig(providerType);
-    this.config = newConfig;
-    this.provider = AIProviderFactory.getProvider(providerType, newConfig);
-  }
-
-  /**
-   * Generate a chat completion with caching
-   */
-  async chat(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
-    this.requestId = uuidv4();
-    this.startTime = Date.now();
-
-    // Check cache if enabled
-    const cacheKey = this.getCacheKey(params);
-    if (process.env.AI_ENABLE_CACHING === 'true') {
-      const cached = this.cache.get<ChatCompletionResponse>(cacheKey);
-      if (cached) {
-        return cached;
-      }
-    }
-
-    try {
-      const response = await this.provider.generateChatCompletion(params);
-      
-      // Cache the response
-      if (process.env.AI_ENABLE_CACHING === 'true') {
-        this.cache.set(cacheKey, response);
-      }
-
-      this.logRequest('chat', params, response);
-      return response;
-    } catch (error) {
-      this.logError('chat', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Stream a chat completion
-   */
-  async *streamChat(params: ChatCompletionParams): AsyncIterable<StreamChunk> {
-    this.requestId = uuidv4();
-    this.startTime = Date.now();
-
-    try {
-      yield* this.provider.streamChatCompletion(params);
-    } catch (error) {
-      this.logError('stream', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate embeddings
-   */
-  async generateEmbeddings(params: any): Promise<any> {
-    this.requestId = uuidv4();
-    this.startTime = Date.now();
-
-    try {
-      const response = await this.provider.generateEmbeddings(params);
-      this.logRequest('embeddings', params, response);
-      return response;
-    } catch (error) {
-      this.logError('embeddings', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Check if the AI service is healthy
-   */
-  async healthCheck(): Promise<HealthCheckResult> {
-    try {
-      const result = await this.provider.healthCheck();
-      return {
-        ...result,
-        latency: Date.now() - this.startTime,
+      results[name] = {
+        healthy: health.healthy,
+        latencyMs: health.latency,
+        circuit: circuit?.getState() || 'UNKNOWN',
       };
+
+      if (!health.healthy || circuit?.getState() === 'OPEN') {
+        allHealthy = false;
+      }
+    }
+
+    return { providers: results, overall: allHealthy };
+  }
+
+  private initializeProviders(): void {
+    if (process.env.OPENAI_API_KEY) {
+      this.providers.set(
+        'openai',
+        new OpenAIProvider({
+          apiKey: process.env.OPENAI_API_KEY,
+          baseURL: process.env.OPENAI_BASE_URL,
+          model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+          maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '4096', 10),
+          temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7'),
+          timeout: parseInt(process.env.OPENAI_TIMEOUT || '60000', 10),
+        })
+      );
+      logger.info('OpenAI provider initialized');
+    }
+
+    if (process.env.ANTHROPIC_API_KEY) {
+      this.providers.set(
+        'anthropic',
+        new AnthropicProvider({
+          apiKey: process.env.ANTHROPIC_API_KEY,
+          baseURL: process.env.ANTHROPIC_BASE_URL,
+          model: process.env.ANTHROPIC_MODEL || 'claude-3-opus-20240229',
+          maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096', 10),
+          temperature: parseFloat(process.env.ANTHROPIC_TEMPERATURE || '0.7'),
+          timeout: parseInt(process.env.ANTHROPIC_TIMEOUT || '60000', 10),
+        })
+      );
+      logger.info('Anthropic provider initialized');
+    }
+
+    if (this.providers.size === 0) {
+      logger.warn('No AI providers configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY');
+    }
+  }
+
+  private initializeCircuitBreakers(): void {
+    for (const name of this.providers.keys()) {
+      this.circuitBreakers.set(
+        name,
+        new CircuitBreaker(name, {
+          failureThreshold: parseInt(
+            process.env.AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5',
+            10
+          ),
+          successThreshold: 2,
+          timeoutMs: parseInt(
+            process.env.AI_CIRCUIT_BREAKER_TIMEOUT_MS || '30000',
+            10
+          ),
+        })
+      );
+    }
+  }
+
+  private getProviderOrder(): string[] {
+    const order = [this.config.primaryProvider];
+    for (const name of this.providers.keys()) {
+      if (name !== this.config.primaryProvider) {
+        order.push(name);
+      }
+    }
+    return order.filter((name) => this.providers.has(name));
+  }
+
+  private async executeWithRetry(
+    providerName: string,
+    request: AICompletionRequest,
+    context: AIRequestContext,
+    requestId: string
+  ): Promise<AICompletionResponse> {
+    const provider = this.providers.get(providerName)!;
+    let lastError: AIProviderError | undefined;
+
+    for (let attempt = 1; attempt <= this.config.maxRetries; attempt++) {
+      try {
+        logger.debug(`AI request attempt ${attempt}`, {
+          requestId,
+          provider: providerName,
+          operation: context.operation,
+        });
+
+        return await provider.complete(request);
+      } catch (error) {
+        const providerError = error as AIProviderError;
+        lastError = providerError;
+
+        if (!providerError.retryable) {
+          throw providerError;
+        }
+
+        if (attempt === this.config.maxRetries) {
+          throw providerError;
+        }
+
+        const backoffMs = Math.min(
+          this.config.initialBackoffMs * Math.pow(2, attempt - 1),
+          this.config.maxBackoffMs
+        );
+
+        logger.warn(`Retrying after ${backoffMs}ms`, {
+          requestId,
+          provider: providerName,
+          attempt,
+          error: providerError.code,
+        });
+
+        await this.sleep(backoffMs);
+      }
+    }
+
+    throw lastError!;
+  }
+
+  private async trackUsage(
+    context: AIRequestContext,
+    response: AICompletionResponse,
+    requestId: string
+  ): Promise<void> {
+    try {
+      const pricing = PRICING[response.model] || { input: 0, output: 0 };
+      const inputCost = (response.usage.promptTokens / 1_000_000) * pricing.input;
+      const outputCost = (response.usage.completionTokens / 1_000_000) * pricing.output;
+      const totalCost = inputCost + outputCost;
+
+      const usageRecord = await prisma.usageRecord.create({
+        data: {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          service: response.provider,
+          operation: context.operation,
+          quantity: response.usage.totalTokens,
+          unit: 'tokens',
+          model: response.model,
+          provider: response.provider,
+          metadata: {
+            promptTokens: response.usage.promptTokens,
+            completionTokens: response.usage.completionTokens,
+            latencyMs: response.latencyMs,
+            requestId,
+          },
+        },
+      });
+
+      await prisma.costRecord.create({
+        data: {
+          tenantId: context.tenantId,
+          usageRecordId: usageRecord.id,
+          service: response.provider,
+          description: `${context.operation} - ${response.model}`,
+          quantity: response.usage.totalTokens,
+          unitCost: totalCost / (response.usage.totalTokens || 1),
+          totalCost,
+          currency: 'USD',
+          periodStart: new Date(),
+          periodEnd: new Date(),
+        },
+      });
+
+      await auditService.log({
+        tenantId: context.tenantId,
+        userId: context.userId,
+        eventType: 'system',
+        action: 'ai_request_success',
+        resource: 'ai_request',
+        resourceId: requestId,
+        details: {
+          operation: context.operation,
+          provider: response.provider,
+          model: response.model,
+          tokens: response.usage.totalTokens,
+          cost: totalCost,
+          latencyMs: response.latencyMs,
+        },
+        status: 'success',
+        duration: response.latencyMs,
+      });
     } catch (error) {
-      return {
-        healthy: false,
-        provider: this.provider.name,
-        version: this.provider.version,
-        latency: Date.now() - this.startTime,
+      logger.error('Failed to track AI usage', {
+        requestId,
         error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: Date.now(),
-      };
+      });
     }
   }
 
-  /**
-   * Get provider configuration
-   */
-  getConfig(): ProviderConfig {
-    return { ...this.config };
-  }
+  private detectPromptInjection(request: AICompletionRequest): PromptInjectionResult {
+    const patterns: { regex: RegExp; severity: 'low' | 'medium' | 'high'; name: string }[] = [
+      { regex: /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i, severity: 'high', name: 'instruction_override' },
+      { regex: /disregard\s+(all\s+)?(previous|prior|above)/i, severity: 'high', name: 'instruction_override' },
+      { regex: /forget\s+(everything|all|your)\s+(you\s+know|instructions?|rules?)/i, severity: 'high', name: 'instruction_override' },
+      { regex: /<\|im_start\|>/i, severity: 'high', name: 'special_token' },
+      { regex: /<\|im_end\|>/i, severity: 'high', name: 'special_token' },
+      { regex: /<\|system\|>/i, severity: 'high', name: 'special_token' },
+      { regex: /\[INST\]/i, severity: 'high', name: 'special_token' },
+      { regex: /(?:print|show|reveal|output|tell)\s+(?:me\s+)?(?:your|the)\s+(?:system\s+)?(?:prompt|instructions?|rules?)/i, severity: 'high', name: 'data_exfiltration' },
+      { regex: /what\s+(?:are|is)\s+your\s+(?:system\s+)?(?:prompt|instructions?|rules?)/i, severity: 'high', name: 'data_exfiltration' },
+      { regex: /repeat\s+(?:the\s+)?(?:text|instructions?|prompt)\s+above/i, severity: 'high', name: 'data_exfiltration' },
+      { regex: /you\s+are\s+now\s+(a|an|the)\s+/i, severity: 'medium', name: 'role_hijack' },
+      { regex: /pretend\s+(to\s+be|you\s+are)/i, severity: 'medium', name: 'role_hijack' },
+      { regex: /act\s+as\s+(if\s+you\s+are|a\s+(?:different|new))/i, severity: 'medium', name: 'role_hijack' },
+      { regex: /new\s+instructions?/i, severity: 'medium', name: 'instruction_override' },
+      { regex: /\[system\]/i, severity: 'medium', name: 'special_token' },
+      { regex: /system\s*:\s*you\s+are/i, severity: 'medium', name: 'system_injection' },
+      { regex: /base64\s*(?:decode|encode|:)/i, severity: 'low', name: 'encoding_trick' },
+      { regex: /rot13/i, severity: 'low', name: 'encoding_trick' },
+      { regex: /hex\s*decode/i, severity: 'low', name: 'encoding_trick' },
+      { regex: /act\s+as\s+(?:if|though)\s+you/i, severity: 'low', name: 'role_hijack' },
+    ];
 
-  /**
-   * Clear the cache
-   */
-  clearCache(): void {
-    this.cache.flushAll();
-  }
+    const matches: { pattern: string; severity: string; name: string }[] = [];
 
-  /**
-   * Get cache stats
-   */
-  getCacheStats(): any {
+    for (const msg of request.messages) {
+      if (msg.role === 'user') {
+        for (const { regex, severity, name } of patterns) {
+          if (regex.test(msg.content)) {
+            matches.push({ pattern: name, severity, name });
+          }
+        }
+      }
+    }
+
+    if (request.systemPrompt) {
+      for (const { regex, severity, name } of patterns) {
+        if (regex.test(request.systemPrompt)) {
+          matches.push({ pattern: `${name}_in_system`, severity: 'high', name });
+        }
+      }
+    }
+
+    if (matches.length === 0) {
+      return { suspicious: false };
+    }
+
+    const severityOrder = { high: 3, medium: 2, low: 1 };
+    const highest = matches.reduce(
+      (max, m) =>
+        severityOrder[m.severity as keyof typeof severityOrder] >
+        severityOrder[max as keyof typeof severityOrder]
+          ? m.severity
+          : max,
+      'low'
+    );
+
     return {
-      keys: this.cache.keys(),
-      stats: this.cache.getStats(),
+      suspicious: true,
+      reason: `${matches.length} pattern(s) matched, highest severity: ${highest}`,
+      severity: highest as 'low' | 'medium' | 'high',
+      matches: matches.map((m) => ({ pattern: m.pattern, severity: m.severity })),
     };
   }
 
-  /**
-   * Get available models from current provider
-   */
-  async getAvailableModels(): Promise<string[]> {
-    return this.provider.getAvailableModels();
+  private generateRequestId(): string {
+    return `ai-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
   }
 
-  /**
-   * Estimate tokens for a conversation
-   */
-  estimateTokens(messages: any[]): number {
-    return this.provider.estimateTokens(messages);
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
 
-  /**
-   * Generate a cache key for request
-   */
-  private getCacheKey(params: ChatCompletionParams): string {
-    const key = {
-      provider: this.providerType,
-      model: params.model || this.config.model,
-      messages: params.messages,
-      temperature: params.temperature ?? this.config.temperature,
-      maxTokens: params.maxTokens || this.config.maxTokens,
-    };
-    return Buffer.from(JSON.stringify(key)).toString('base64');
-  }
+let aiServiceInstance: AIService | undefined;
 
-  /**
-   * Log successful request
-   */
-  private logRequest(type: string, params: any, response: any): void {
-    const elapsed = Date.now() - this.startTime;
-    console.log(JSON.stringify({
-      level: 'info',
-      timestamp: new Date().toISOString(),
-      requestId: this.requestId,
-      type,
-      provider: this.provider.name,
-      model: this.config.model,
-      elapsed,
-      tokens: response.usage?.totalTokens || 0,
-      success: true,
-    }));
+export function getAIService(): AIService {
+  if (!aiServiceInstance) {
+    aiServiceInstance = new AIService();
   }
-
-  /**
-   * Log error
-   */
-  private logError(type: string, error: unknown): void {
-    const elapsed = Date.now() - this.startTime;
-    console.error(JSON.stringify({
-      level: 'error',
-      timestamp: new Date().toISOString(),
-      requestId: this.requestId,
-      type,
-      provider: this.provider.name,
-      elapsed,
-      error: error instanceof Error ? error.message : 'Unknown error',
-      success: false,
-    }));
-  }
-  }
+  return aiServiceInstance;
+}
