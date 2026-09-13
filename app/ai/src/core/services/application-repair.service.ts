@@ -1,13 +1,24 @@
 /**
  * VYENFITA Application Repair Service
- * Automatically repairs invalid application specifications
  * 
- * This is the core of the self-correction loop.
- * It takes an invalid spec, identifies errors, and asks the AI to fix them.
+ * Automatically repairs invalid application specifications
+ * using AI with structured error feedback.
+ * 
+ * This is the core of the self-correction loop:
+ * - Takes an invalid spec
+ * - Identifies errors
+ * - Asks AI to fix them
+ * - Validates the fix
+ * - Retries if needed
+ * 
+ * @version 1.0.1
  */
 
 import { AIService } from './ai.service';
-import { ApplicationSpecValidator, ValidationError } from '../validators/application-spec.validator';
+import {
+  ApplicationSpecValidator,
+  ValidationError,
+} from '../validators/application-spec.validator';
 import { ApplicationSpec } from '../schemas/application-spec.schema';
 import { ChatMessage } from '../interfaces/ai-provider.interface';
 
@@ -18,6 +29,13 @@ export interface RepairResult {
   warnings: string[];
   repairAttempts: number;
   originalErrors: ValidationError[];
+  fixedErrors: string[];
+}
+
+export interface WorkflowRepairResult {
+  success: boolean;
+  spec?: any;
+  repairAttempts: number;
   fixedErrors: string[];
 }
 
@@ -73,21 +91,21 @@ export class ApplicationRepairService {
           success: true,
           spec: validation.data,
           errors: [],
-          warnings: validation.warnings.map(w => w.message),
+          warnings: validation.warnings.map((w) => w.message),
           repairAttempts: attempt,
           originalErrors,
-          fixedErrors: originalErrors.map(e => e.message),
+          fixedErrors: originalErrors.map((e) => e.message),
         };
       }
 
       // If still invalid, try again recursively
       const retryResult = await this.repair(fixedSpec, attempt + 1);
-      
+
       return {
         ...retryResult,
         originalErrors,
         fixedErrors: [
-          ...originalErrors.map(e => e.message),
+          ...originalErrors.map((e) => e.message),
           ...retryResult.fixedErrors,
         ],
       };
@@ -98,6 +116,82 @@ export class ApplicationRepairService {
         warnings: [],
         repairAttempts: attempt,
         originalErrors,
+        fixedErrors,
+      };
+    }
+  }
+
+  /**
+   * Repair a workflow specification
+   * 
+   * @param workflow - Invalid workflow spec
+   * @param errors - Validation errors from validator
+   */
+  async repairWorkflow(
+    workflow: any,
+    errors: any[]
+  ): Promise<WorkflowRepairResult> {
+    try {
+      const errorDetails = errors
+        .map((e: any, i: number) => {
+          if (typeof e === 'string') return `${i + 1}. ${e}`;
+          const path = Array.isArray(e.path) ? e.path.join('.') : String(e.path || '');
+          return `${i + 1}. [${path}] ${e.message || String(e)}`;
+        })
+        .join('\n');
+
+      const systemPrompt = `You are VYENFITA Repair Agent, a specialized AI that fixes invalid workflow specifications.
+
+Your ONLY job is to repair the provided workflow spec so it becomes valid.
+
+RULES:
+1. DO NOT change the core functionality or user intent
+2. ONLY fix the specific errors listed
+3. PRESERVE all valid parts of the specification
+4. Output ONLY the repaired JSON, nothing else
+5. Do NOT add explanations, comments, or markdown
+6. Ensure all required fields exist: name, steps (with at least 1 step), and each step must have type and action
+7. Optionally add triggers array if missing
+
+Output the fixed workflow as valid JSON.`;
+
+      const userPrompt = `The following workflow specification has validation errors.
+
+ERRORS TO FIX:
+${errorDetails}
+
+CURRENT SPECIFICATION:
+${JSON.stringify(workflow, null, 2)}
+
+Fix the errors and output ONLY the repaired JSON.`;
+
+      const messages: ChatMessage[] = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ];
+
+      const response = await this.aiService.chat({
+        messages,
+        temperature: 0.3,
+        maxTokens: 4096,
+      });
+
+      const content = response.choices[0].message.content;
+      const fixed = this.extractJSON(content);
+
+      return {
+        success: true,
+        spec: fixed,
+        repairAttempts: 1,
+        fixedErrors: errors.map((e: any) =>
+          typeof e === 'string' ? e : e.message || String(e)
+        ),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        spec: workflow,
+        repairAttempts: 1,
         fixedErrors: [],
       };
     }
@@ -106,7 +200,10 @@ export class ApplicationRepairService {
   /**
    * Request AI to repair the specification
    */
-  private async requestRepair(spec: any, errors: ValidationError[]): Promise<any> {
+  private async requestRepair(
+    spec: any,
+    errors: ValidationError[]
+  ): Promise<any> {
     const systemPrompt = this.getRepairSystemPrompt();
     const userPrompt = this.buildRepairPrompt(spec, errors);
 
@@ -117,7 +214,7 @@ export class ApplicationRepairService {
 
     const response = await this.aiService.chat({
       messages,
-      temperature: 0.3, // Lower temperature for more precise fixes
+      temperature: 0.3,
       maxTokens: 4096,
     });
 
@@ -150,9 +247,9 @@ Focus ONLY on fixing the errors listed below.`;
    * Build the repair prompt
    */
   private buildRepairPrompt(spec: any, errors: ValidationError[]): string {
-    const errorDetails = errors.map((e, i) => 
-      `${i + 1}. [${e.path.join('.')}] ${e.message}`
-    ).join('\n');
+    const errorDetails = errors
+      .map((e, i) => `${i + 1}. [${e.path.join('.')}] ${e.message}`)
+      .join('\n');
 
     return `The following application specification has validation errors.
 
@@ -170,11 +267,21 @@ Remember: Output ONLY the fixed JSON, nothing else.`;
    * Extract JSON from AI response
    */
   private extractJSON(content: string): any {
+    // Try direct parse first
+    try {
+      return JSON.parse(content);
+    } catch {}
+
     // Try to find JSON in the response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error('No JSON found in AI response');
     }
-    return JSON.parse(jsonMatch[0]);
+
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new Error('Failed to parse JSON from AI response');
+    }
   }
-  }
+            }
