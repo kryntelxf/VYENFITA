@@ -1,15 +1,7 @@
 /**
  * VYENFITA Multi-Step Generator
  * 
- * Generates applications in multiple steps for better quality:
- * 1. Requirement Analysis
- * 2. Architecture Design
- * 3. Data Model Design
- * 4. UI/UX Design
- * 5. Application Build
- * 6. Validation & Repair
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { AIService } from './ai.service';
@@ -46,19 +38,16 @@ export class MultiStepGenerator {
     this.repairService = new ApplicationRepairService(aiService);
   }
 
-  /**
-   * Generate application with multi-step process
-   */
-  async generate(description: string, context?: Record<string, any>): Promise<MultiStepResult> {
+  async generate(
+    description: string,
+    context?: Record<string, any>
+  ): Promise<MultiStepResult> {
     const startTime = Date.now();
     const steps: GenerationStep[] = [];
     const errors: string[] = [];
     const warnings: string[] = [];
 
     try {
-      // ============================================================
-      // STEP 1: REQUIREMENT ANALYSIS
-      // ============================================================
       const step1 = await this.runStep(
         'requirement-analysis',
         'Requirement Analysis',
@@ -69,9 +58,6 @@ export class MultiStepGenerator {
         errors.push(step1.error || 'Requirement analysis failed');
       }
 
-      // ============================================================
-      // STEP 2: ARCHITECTURE DESIGN
-      // ============================================================
       const step2 = await this.runStep(
         'architecture-design',
         'Architecture Design',
@@ -82,9 +68,6 @@ export class MultiStepGenerator {
         errors.push(step2.error || 'Architecture design failed');
       }
 
-      // ============================================================
-      // STEP 3: DATA MODEL DESIGN
-      // ============================================================
       const step3 = await this.runStep(
         'data-model-design',
         'Data Model Design',
@@ -95,9 +78,6 @@ export class MultiStepGenerator {
         errors.push(step3.error || 'Data model design failed');
       }
 
-      // ============================================================
-      // STEP 4: UI/UX DESIGN
-      // ============================================================
       const step4 = await this.runStep(
         'ui-design',
         'UI/UX Design',
@@ -108,9 +88,6 @@ export class MultiStepGenerator {
         errors.push(step4.error || 'UI/UX design failed');
       }
 
-      // ============================================================
-      // STEP 5: APPLICATION BUILD
-      // ============================================================
       const step5 = await this.runStep(
         'application-build',
         'Application Build',
@@ -121,9 +98,6 @@ export class MultiStepGenerator {
         errors.push(step5.error || 'Application build failed');
       }
 
-      // ============================================================
-      // STEP 6: VALIDATION & REPAIR
-      // ============================================================
       let spec = step5.output;
       if (spec) {
         const validation = ApplicationSpecValidator.validate(spec);
@@ -137,7 +111,7 @@ export class MultiStepGenerator {
           }
         }
         if (validation.warnings && validation.warnings.length > 0) {
-          warnings.push(...validation.warnings.map(w => w.message));
+          warnings.push(...validation.warnings.map((w) => w.message));
         }
       }
 
@@ -151,7 +125,6 @@ export class MultiStepGenerator {
         warnings,
         elapsed,
       };
-
     } catch (error) {
       const elapsed = Date.now() - startTime;
       return {
@@ -164,10 +137,6 @@ export class MultiStepGenerator {
       };
     }
   }
-
-  // ============================================================
-  // STEP EXECUTOR
-  // ============================================================
 
   private async runStep(
     id: string,
@@ -195,14 +164,10 @@ export class MultiStepGenerator {
     return step;
   }
 
-  // ============================================================
-  // STEP IMPLEMENTATIONS
-  // ============================================================
-
-  /**
-   * STEP 1: Analyze requirements
-   */
-  private async analyzeRequirements(description: string, context?: Record<string, any>): Promise<any> {
+  private async analyzeRequirements(
+    description: string,
+    _context?: Record<string, any>
+  ): Promise<any> {
     const systemPrompt = `You are VYENFITA Requirement Analyst. Analyze the user's description and extract structured requirements.
 
 Output a valid JSON object:
@@ -224,7 +189,7 @@ Output a valid JSON object:
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: description + (context ? `\n\nContext: ${JSON.stringify(context)}` : '') },
+      { role: 'user', content: description },
     ];
 
     const response = await this.aiService.chat({
@@ -236,10 +201,10 @@ Output a valid JSON object:
     return this.extractJSON(response.choices[0].message.content);
   }
 
-  /**
-   * STEP 2: Design architecture
-   */
-  private async designArchitecture(requirements: any, context?: Record<string, any>): Promise<any> {
+  private async designArchitecture(
+    requirements: any,
+    _context?: Record<string, any>
+  ): Promise<any> {
     const systemPrompt = `You are VYENFITA Architecture Designer. Design the architecture based on the requirements.
 
 Output a valid JSON object:
@@ -274,13 +239,14 @@ Output a valid JSON object:
     return this.extractJSON(response.choices[0].message.content);
   }
 
-  /**
-   * STEP 3: Design data model
-   */
-  private async designDataModel(architecture: any, context?: Record<string, any>): Promise<any> {
+  private async designDataModel(
+    architecture: any,
+    _context?: Record<string, any>
+  ): Promise<any> {
     const systemPrompt = `You are VYENFITA Data Model Designer. Design the data model based on the architecture.
 
 Output a valid JSON object with entities, fields, and relationships.
+
 Follow this structure:
 {
   "entities": [
@@ -310,10 +276,10 @@ Follow this structure:
     return this.extractJSON(response.choices[0].message.content);
   }
 
-  /**
-   * STEP 4: Design UI/UX
-   */
-  private async designUI(dataModel: any, context?: Record<string, any>): Promise<any> {
+  private async designUI(
+    dataModel: any,
+    _context?: Record<string, any>
+  ): Promise<any> {
     const systemPrompt = `You are VYENFITA UI/UX Designer. Design the user interface based on the data model.
 
 Output a valid JSON object:
@@ -356,12 +322,10 @@ Output a valid JSON object:
     return this.extractJSON(response.choices[0].message.content);
   }
 
-  /**
-   * STEP 5: Build application
-   */
-  private async buildApplication(uiDesign: any, context?: Record<string, any>): Promise<any> {
-    // Combine all previous steps into a complete application spec
-    // This is a simplified version - in reality, this would use a template system
+  private async buildApplication(
+    uiDesign: any,
+    context?: Record<string, any>
+  ): Promise<any> {
     const spec = {
       metadata: {
         name: context?.name || 'Generated Application',
@@ -374,6 +338,7 @@ Output a valid JSON object:
       requirements: context?.requirements || [],
       entities: uiDesign.entities || [],
       pages: uiDesign.pages || [],
+      queries: uiDesign.queries || [],
       roles: [
         {
           id: 'role-admin',
@@ -414,10 +379,6 @@ Output a valid JSON object:
     return spec;
   }
 
-  // ============================================================
-  // HELPERS
-  // ============================================================
-
   private extractJSON(content: string): any {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -425,4 +386,4 @@ Output a valid JSON object:
     }
     return JSON.parse(jsonMatch[0]);
   }
-}
+          }
