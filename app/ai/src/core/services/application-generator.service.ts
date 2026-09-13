@@ -1,12 +1,19 @@
 /**
  * VYENFITA Application Generator Service
  * 
+ * Generates application structure and code from natural language description
+ * with self-correction capability
+ * 
  * @version 1.0.2
  */
 
 import { AIService } from './ai.service';
 import { ChatMessage } from '../interfaces/ai-provider.interface';
-import { ApplicationSpecValidator, ValidationResult, ValidationError } from '../validators/application-spec.validator';
+import {
+  ApplicationSpecValidator,
+  ValidationResult,
+  ValidationError,
+} from '../validators/application-spec.validator';
 import { ApplicationSpec } from '../schemas/application-spec.schema';
 import { ApplicationRepairService } from './application-repair.service';
 
@@ -19,6 +26,9 @@ export class ApplicationGeneratorService {
     this.repairService = new ApplicationRepairService(aiService);
   }
 
+  /**
+   * Generate application from description (legacy)
+   */
   async generateApplication(
     description: string,
     context?: Record<string, any>
@@ -42,13 +52,19 @@ export class ApplicationGeneratorService {
 
   /**
    * Generate application with self-correction
+   * 
+   * This is the main entry point for application generation.
+   * It generates, validates, and repairs if needed.
    */
   async generateApplicationWithSelfCorrection(
     description: string,
     context?: Record<string, any>,
     _maxAttempts: number = 3
   ): Promise<GeneratedApplicationWithRepair> {
+    // Step 1: Generate initial application
     const initialSpec = await this.generateApplication(description, context);
+
+    // Step 2: Validate
     const validation = ApplicationSpecValidator.validate(initialSpec);
 
     if (validation.isValid && validation.data) {
@@ -61,8 +77,10 @@ export class ApplicationGeneratorService {
       };
     }
 
+    // Step 3: Repair if invalid
     const repairResult = await this.repairService.repair(initialSpec);
 
+    // Step 4: Final validation
     const finalValidation =
       repairResult.success && repairResult.spec
         ? ApplicationSpecValidator.validate(repairResult.spec)
@@ -79,6 +97,9 @@ export class ApplicationGeneratorService {
     };
   }
 
+  /**
+   * Generate workflow from description
+   */
   async generateWorkflow(description: string): Promise<any> {
     const systemPrompt = this.getWorkflowSystemPrompt();
     const messages: ChatMessage[] = [
@@ -95,11 +116,17 @@ export class ApplicationGeneratorService {
     return this.parseWorkflow(response.choices[0].message.content);
   }
 
+  /**
+   * Generate workflow with self-correction
+   */
   async generateWorkflowWithSelfCorrection(
     description: string,
     _maxAttempts: number = 3
   ): Promise<GeneratedWorkflowWithRepair> {
+    // Step 1: Generate initial workflow
     const initialSpec = await this.generateWorkflow(description);
+
+    // Step 2: Validate (simplified validation for workflow)
     const validation = this.validateWorkflow(initialSpec);
 
     if (validation.isValid) {
@@ -112,7 +139,7 @@ export class ApplicationGeneratorService {
       };
     }
 
-    // Try to repair
+    // Step 3: Repair if invalid
     const repairResult = await this.repairService.repairWorkflow(
       initialSpec,
       validation.errors
@@ -131,10 +158,43 @@ export class ApplicationGeneratorService {
     };
   }
 
+  /**
+   * Generate data model from description
+   */
   async generateDataModel(description: string): Promise<any> {
-    const systemPrompt = `You are VYENFITA, an expert data architect. Generate a complete data model.
+    const systemPrompt = `You are VYENFITA, an expert data architect. Generate a complete data model based on the user's description.
 
-Output valid JSON with entities, fields, relationships.`;
+Your response must be a valid JSON object with this structure:
+{
+  "name": "Data Model Name",
+  "description": "Model description",
+  "entities": [
+    {
+      "name": "EntityName",
+      "fields": [
+        {
+          "name": "fieldName",
+          "type": "string|number|boolean|date|object|array|reference",
+          "required": true|false,
+          "description": "Field description"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "one-to-one|one-to-many|many-to-many",
+          "target": "TargetEntity",
+          "field": "fieldName"
+        }
+      ]
+    }
+  ],
+  "indexes": [
+    {
+      "fields": ["field1", "field2"],
+      "unique": true|false
+    }
+  ]
+}`;
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -150,10 +210,46 @@ Output valid JSON with entities, fields, relationships.`;
     return this.parseDataModel(response.choices[0].message.content);
   }
 
+  /**
+   * Generate API specifications from description
+   */
   async generateAPI(description: string): Promise<any> {
-    const systemPrompt = `You are VYENFITA, an expert API designer. Generate REST API spec.
+    const systemPrompt = `You are VYENFITA, an expert API designer. Generate a complete REST API specification based on the user's description.
 
-Output valid JSON with endpoints, parameters, responses.`;
+Your response must be a valid JSON object with this structure:
+{
+  "name": "API Name",
+  "description": "API description",
+  "version": "1.0.0",
+  "basePath": "/api/v1",
+  "endpoints": [
+    {
+      "path": "/users",
+      "method": "GET|POST|PUT|DELETE|PATCH",
+      "summary": "Endpoint summary",
+      "description": "Detailed description",
+      "parameters": [
+        {
+          "name": "paramName",
+          "in": "query|path|body|header",
+          "required": true|false,
+          "schema": {
+            "type": "string|number|boolean|object|array"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Success response",
+          "schema": {
+            "type": "object",
+            "properties": {}
+          }
+        }
+      }
+    }
+  ]
+}`;
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -169,32 +265,162 @@ Output valid JSON with endpoints, parameters, responses.`;
     return this.parseAPI(response.choices[0].message.content);
   }
 
+  // ============================================================
+  // PRIVATE METHODS
+  // ============================================================
+
   private getSystemPrompt(): string {
-    return `You are VYENFITA, an AI application builder.
+    return `You are VYENFITA, an AI application builder with expertise in low-code and no-code platforms.
 
-Generate complete application structures based on user descriptions.
+Generate complete application structures based on user descriptions. Your output must be production-ready and follow best practices.
 
-Output must be valid JSON with this structure:
+Your response must be a valid JSON object with this exact structure:
 {
-  "metadata": { "name": "...", "description": "...", "version": "1.0.0" },
+  "metadata": {
+    "name": "Application Name",
+    "description": "Application description",
+    "version": "1.0.0"
+  },
   "requirements": [],
-  "entities": [],
-  "dataSources": [],
-  "pages": [],
+  "entities": [
+    {
+      "id": "entity-1",
+      "name": "EntityName",
+      "description": "Entity description",
+      "fields": [
+        {
+          "id": "field-1",
+          "name": "fieldName",
+          "type": "string|number|boolean|date|datetime|object|array|reference|email|phone|url|json|file|image|password",
+          "required": true|false,
+          "unique": true|false,
+          "description": "Field description"
+        }
+      ],
+      "relationships": []
+    }
+  ],
+  "dataSources": [
+    {
+      "id": "ds-1",
+      "name": "Datasource Name",
+      "type": "api|database|file|external-service|webhook",
+      "config": {
+        "url": "https://api.example.com",
+        "authType": "none|basic|bearer|oauth2|api-key"
+      },
+      "isDefault": true|false
+    }
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page Name",
+      "path": "/page-url",
+      "type": "dashboard|form|table|custom|login|profile|settings|reports",
+      "layout": "full|sidebar|split",
+      "widgets": [
+        {
+          "id": "widget-1",
+          "type": "text|button|table|chart|form|input|select|datepicker|filepicker|map|image|video|iframe|card|list|grid|tabs|accordion",
+          "props": {},
+          "position": { "x": 0, "y": 0, "width": 6, "height": 4 },
+          "actions": []
+        }
+      ]
+    }
+  ],
   "queries": [],
   "workflows": [],
-  "roles": [],
+  "roles": [
+    {
+      "id": "role-1",
+      "name": "Admin",
+      "description": "Administrator role",
+      "permissions": [
+        { "resource": "*", "action": "create|read|update|delete|execute|approve|manage" }
+      ],
+      "isDefault": false,
+      "isAdmin": true
+    },
+    {
+      "id": "role-2",
+      "name": "User",
+      "description": "Regular user role",
+      "permissions": [
+        { "resource": "data", "action": "read" }
+      ],
+      "isDefault": true,
+      "isAdmin": false
+    }
+  ],
   "integrations": [],
   "tests": { "unit": [], "integration": [], "security": [] },
-  "deployment": { "environments": [], "autoDeploy": false, "requireApproval": true },
+  "deployment": {
+    "environments": [
+      {
+        "name": "development",
+        "url": "http://localhost:8080",
+        "config": {},
+        "variables": {}
+      }
+    ],
+    "autoDeploy": false,
+    "requireApproval": true,
+    "healthCheck": {
+      "path": "/health",
+      "timeout": 5000,
+      "expectedStatus": 200
+    }
+  },
   "audit": { "changes": [], "logs": [] }
 }`;
   }
 
   private getWorkflowSystemPrompt(): string {
-    return `You are VYENFITA, an expert in business process automation.
+    return `You are VYENFITA, an expert in business process automation and workflow design.
 
-Output valid JSON with triggers, steps, errorHandling.`;
+Generate automation workflows based on user descriptions. Your workflows must be reliable, scalable, and follow best practices.
+
+Your response must be a valid JSON object with this exact structure:
+{
+  "id": "wf-1",
+  "name": "Workflow Name",
+  "description": "Workflow description",
+  "version": "1.0.0",
+  "triggers": [
+    {
+      "id": "trigger-1",
+      "type": "schedule|event|webhook|manual|api",
+      "config": {
+        "schedule": "0 9 * * 1",
+        "event": "user.created",
+        "webhook": "/webhook/path"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "step-1",
+      "name": "Step Name",
+      "type": "action|condition|loop|wait|parallel|subflow|notification",
+      "action": "send_email|update_database|call_api|notify|transform|filter|aggregate|approval|webhook",
+      "config": {},
+      "conditions": [],
+      "onError": "continue|stop|retry|notify",
+      "retryConfig": {
+        "maxAttempts": 3,
+        "delayMs": 5000
+      }
+    }
+  ],
+  "errorHandling": {
+    "retryCount": 3,
+    "retryDelay": 5000,
+    "notifyOnError": true,
+    "notifyTo": ["admin@example.com"]
+  }
+}`;
   }
 
   private buildUserPrompt(
@@ -202,10 +428,13 @@ Output valid JSON with triggers, steps, errorHandling.`;
     context?: Record<string, any>
   ): string {
     let prompt = `Build a complete application for: ${description}\n\n`;
+
     if (context) {
       prompt += `Additional context:\n${JSON.stringify(context, null, 2)}\n\n`;
     }
-    prompt += 'Generate the application structure in JSON format.';
+
+    prompt +=
+      'Generate the application structure in JSON format. Make sure it follows the exact schema provided.';
     return prompt;
   }
 
@@ -281,6 +510,10 @@ Output valid JSON with triggers, steps, errorHandling.`;
     }
   }
 
+  // ============================================================
+  // WORKFLOW VALIDATION
+  // ============================================================
+
   private validateWorkflow(data: any): ValidationResult {
     const errors: ValidationError[] = [];
     const warnings: any[] = [];
@@ -301,7 +534,7 @@ Output valid JSON with triggers, steps, errorHandling.`;
       });
     }
 
-    if (data.steps) {
+    if (data.steps && Array.isArray(data.steps)) {
       for (let i = 0; i < data.steps.length; i++) {
         const step = data.steps[i];
         if (!step.type) {
@@ -359,4 +592,4 @@ export interface GeneratedWorkflowWithRepair {
   isRepaired: boolean;
   originalErrors?: ValidationError[];
   fixedErrors?: string[];
-  }
+      }
