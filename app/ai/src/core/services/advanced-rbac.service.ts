@@ -1,14 +1,7 @@
 /**
  * VYENFITA Advanced RBAC Service
  * 
- * Advanced Role-Based Access Control
- * - Role hierarchy
- * - Attribute-based access control (ABAC)
- * - Policy-based access control (PBAC)
- * - Resource-based access control
- * - Time-based access control
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -33,8 +26,8 @@ export interface Role {
   id: string;
   name: string;
   description: string;
-  permissions: string[]; // Permission IDs
-  hierarchy: string[]; // Child role IDs
+  permissions: string[];
+  hierarchy: string[];
   isDefault: boolean;
   isSystem: boolean;
   createdAt: Date;
@@ -79,22 +72,18 @@ export interface AccessResult {
 export class AdvancedRBACService {
   private permissions: Map<string, Permission>;
   private roles: Map<string, Role>;
-  private policies: Map<string, Policy>;
+  // Policy storage reserved for future use
+  private _policies: Map<string, Policy>;
 
   constructor() {
     this.permissions = new Map();
     this.roles = new Map();
-    this.policies = new Map();
+    this._policies = new Map();
 
-    // Initialize default roles and permissions
     this.initializeDefaults();
   }
 
-  /**
-   * Initialize default roles and permissions
-   */
   private initializeDefaults(): void {
-    // Create permissions
     const permissions: Permission[] = [
       { id: 'perm-all', name: 'Full Access', description: 'Full access to all resources', resource: '*', action: 'all' },
       { id: 'perm-app-create', name: 'Create Applications', description: 'Create new applications', resource: 'application', action: 'create' },
@@ -112,7 +101,6 @@ export class AdvancedRBACService {
       this.permissions.set(perm.id, perm);
     }
 
-    // Create roles
     const roles: Role[] = [
       {
         id: 'role-admin',
@@ -165,9 +153,6 @@ export class AdvancedRBACService {
     }
   }
 
-  /**
-   * Create a new permission
-   */
   createPermission(
     name: string,
     description: string,
@@ -188,9 +173,6 @@ export class AdvancedRBACService {
     return permission;
   }
 
-  /**
-   * Create a new role
-   */
   createRole(
     name: string,
     description: string,
@@ -214,9 +196,6 @@ export class AdvancedRBACService {
     return role;
   }
 
-  /**
-   * Update a role
-   */
   updateRole(id: string, updates: Partial<Role>): Role | undefined {
     const role = this.roles.get(id);
     if (!role) return undefined;
@@ -227,44 +206,26 @@ export class AdvancedRBACService {
     return role;
   }
 
-  /**
-   * Delete a role
-   */
   deleteRole(id: string): boolean {
     return this.roles.delete(id);
   }
 
-  /**
-   * Get all roles
-   */
   getRoles(): Role[] {
     return Array.from(this.roles.values());
   }
 
-  /**
-   * Get role by ID
-   */
   getRole(id: string): Role | undefined {
     return this.roles.get(id);
   }
 
-  /**
-   * Get all permissions
-   */
   getPermissions(): Permission[] {
     return Array.from(this.permissions.values());
   }
 
-  /**
-   * Get permission by ID
-   */
   getPermission(id: string): Permission | undefined {
     return this.permissions.get(id);
   }
 
-  /**
-   * Check if a user has permission
-   */
   hasPermission(userRoles: string[], resource: string, action: string, attributes?: Record<string, any>): AccessResult {
     const allowedPermissions: string[] = [];
     const matchedRoles: string[] = [];
@@ -273,17 +234,14 @@ export class AdvancedRBACService {
       const role = this.roles.get(roleId);
       if (!role) continue;
 
-      // Check if role has the permission
       for (const permId of role.permissions) {
         const perm = this.permissions.get(permId);
         if (!perm) continue;
 
-        // Check resource and action
         if ((perm.resource === '*' || perm.resource === resource) &&
             (perm.action === 'all' || perm.action === action)) {
           allowedPermissions.push(permId);
 
-          // Check conditions
           if (perm.conditions && attributes) {
             const conditionsMet = this.checkConditions(perm.conditions, attributes);
             if (conditionsMet) {
@@ -295,7 +253,6 @@ export class AdvancedRBACService {
         }
       }
 
-      // Check hierarchy (permissions inherited from child roles)
       for (const childId of role.hierarchy) {
         const childRole = this.roles.get(childId);
         if (childRole) {
@@ -313,7 +270,6 @@ export class AdvancedRBACService {
       }
     }
 
-    // Remove duplicates
     const uniquePermissions = [...new Set(allowedPermissions)];
     const uniqueRoles = [...new Set(matchedRoles)];
 
@@ -328,9 +284,6 @@ export class AdvancedRBACService {
     };
   }
 
-  /**
-   * Check permission conditions
-   */
   private checkConditions(conditions: PermissionCondition[], attributes: Record<string, any>): boolean {
     for (const condition of conditions) {
       const value = this.getNestedValue(attributes, condition.attribute);
@@ -355,7 +308,6 @@ export class AdvancedRBACService {
           if (value >= condition.value) return false;
           break;
         default:
-          // Custom operators
           if (condition.operator === 'between') {
             const [min, max] = condition.value;
             if (value < min || value > max) return false;
@@ -367,9 +319,6 @@ export class AdvancedRBACService {
     return true;
   }
 
-  /**
-   * Get nested value from object
-   */
   private getNestedValue(obj: any, path: string): any {
     const parts = path.split('.');
     let current = obj;
@@ -380,9 +329,6 @@ export class AdvancedRBACService {
     return current;
   }
 
-  /**
-   * Get user roles with full permission details
-   */
   getUserRolesWithPermissions(userRoles: string[]): {
     role: Role;
     permissions: Permission[];
@@ -403,9 +349,6 @@ export class AdvancedRBACService {
     return result;
   }
 
-  /**
-   * Get all permissions for a user
-   */
   getUserPermissions(userRoles: string[]): Permission[] {
     const allPermissions = new Set<string>();
     const result: Permission[] = [];
@@ -418,13 +361,10 @@ export class AdvancedRBACService {
         if (!allPermissions.has(permId)) {
           allPermissions.add(permId);
           const perm = this.permissions.get(permId);
-          if (perm) {
-            result.push(perm);
-          }
+          if (perm) result.push(perm);
         }
       }
 
-      // Check hierarchy
       for (const childId of role.hierarchy) {
         const childRole = this.roles.get(childId);
         if (childRole) {
@@ -432,9 +372,7 @@ export class AdvancedRBACService {
             if (!allPermissions.has(permId)) {
               allPermissions.add(permId);
               const perm = this.permissions.get(permId);
-              if (perm) {
-                result.push(perm);
-              }
+              if (perm) result.push(perm);
             }
           }
         }
