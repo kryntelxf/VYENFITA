@@ -9,13 +9,13 @@
  * - Timeout enforcement
  * - Cancellation support
  * 
- * @version 1.0.0
+ * @version 1.1.0
  */
 
-import { prisma } from '../database/client';
-import { auditService } from '../audit/audit.service';
-import { getExecutorRegistry } from './executor-registry';
-import { StepContext, StepResult } from './executors/executor.interface';
+import { prisma } from '../../lib/database/client';
+import { auditService } from '../../lib/audit/audit.service';
+import { getExecutorRegistry } from '../../lib/workflow/executor-registry';
+import { StepContext, StepResult } from '../../lib/workflow/executors/executor.interface';
 import winston from 'winston';
 
 const logger = winston.createLogger({
@@ -234,7 +234,6 @@ export class WorkflowEngine {
   }
 
   cleanup(): void {
-    // Placeholder for future cleanup logic
     logger.info('Workflow engine cleanup called');
   }
 
@@ -476,4 +475,4 @@ export function getWorkflowEngine(): WorkflowEngine {
     engineInstance = new WorkflowEngine();
   }
   return engineInstance;
-        }
+      }
