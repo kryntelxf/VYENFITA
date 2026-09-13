@@ -1,14 +1,7 @@
 /**
  * VYENFITA Cost Management Service
  * 
- * Manages costs for AI and infrastructure usage
- * - Usage tracking
- * - Cost estimation
- * - Budget management
- * - Cost alerts
- * - Cost optimization
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -71,9 +64,6 @@ export class CostManagementService {
     this.recommendations = new Map();
   }
 
-  /**
-   * Record a cost entry
-   */
   recordCost(
     tenantId: string,
     userId: string,
@@ -96,16 +86,11 @@ export class CostManagementService {
     };
 
     this.costRecords.set(record.id, record);
-
-    // Check budgets
     this.checkBudgets(tenantId, service, record.totalCost);
 
     return record;
   }
 
-  /**
-   * Get cost records
-   */
   getCostRecords(
     tenantId: string,
     service?: string,
@@ -123,10 +108,10 @@ export class CostManagementService {
     return result.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   }
 
-  /**
-   * Get cost summary
-   */
-  getCostSummary(tenantId: string, timeRange?: { start: Date; end: Date }): {
+  getCostSummary(
+    tenantId: string,
+    timeRange?: { start: Date; end: Date }
+  ): {
     total: number;
     byService: Record<string, number>;
     byUser: Record<string, number>;
@@ -155,9 +140,6 @@ export class CostManagementService {
     return summary;
   }
 
-  /**
-   * Create a budget
-   */
   createBudget(
     tenantId: string,
     service: string,
@@ -183,9 +165,6 @@ export class CostManagementService {
     return budget;
   }
 
-  /**
-   * Update a budget
-   */
   updateBudget(id: string, updates: Partial<Budget>): Budget | undefined {
     const budget = this.budgets.get(id);
     if (!budget) return undefined;
@@ -196,9 +175,6 @@ export class CostManagementService {
     return budget;
   }
 
-  /**
-   * Get budgets for a tenant
-   */
   getBudgets(tenantId: string): Budget[] {
     const result: Budget[] = [];
     for (const budget of this.budgets.values()) {
@@ -209,21 +185,21 @@ export class CostManagementService {
     return result;
   }
 
-  /**
-   * Check budgets and trigger alerts
-   */
   private checkBudgets(tenantId: string, service: string, cost: number): void {
-    const budgets = this.getBudgets(tenantId).filter(b => b.service === service || b.service === 'all');
+    const budgets = this.getBudgets(tenantId).filter(
+      (b) => b.service === service || b.service === 'all'
+    );
 
     for (const budget of budgets) {
       budget.used += cost;
 
-      // Check if budget exceeded
       if (budget.used > budget.limit) {
-        this.triggerAlert(budget.id, `Budget exceeded for ${budget.service}: ${budget.used} / ${budget.limit}`);
+        this.triggerAlert(
+          budget.id,
+          `Budget exceeded for ${budget.service}: ${budget.used} / ${budget.limit}`
+        );
       }
 
-      // Check if threshold reached
       const usagePercent = (budget.used / budget.limit) * 100;
       if (usagePercent >= budget.alertThreshold) {
         this.triggerAlert(
@@ -232,7 +208,6 @@ export class CostManagementService {
         );
       }
 
-      // Reset if period has passed
       if (new Date() > budget.resetAt) {
         budget.used = 0;
         budget.resetAt = this.getNextResetDate(budget.period);
@@ -243,9 +218,6 @@ export class CostManagementService {
     }
   }
 
-  /**
-   * Trigger a budget alert
-   */
   private triggerAlert(budgetId: string, message: string): void {
     const budget = this.budgets.get(budgetId);
     if (!budget) return;
@@ -263,9 +235,6 @@ export class CostManagementService {
     this.budgets.set(budgetId, budget);
   }
 
-  /**
-   * Get next reset date for a period
-   */
   private getNextResetDate(period: Budget['period']): Date {
     const now = new Date();
     switch (period) {
@@ -284,15 +253,11 @@ export class CostManagementService {
     }
   }
 
-  /**
-   * Generate cost optimization recommendations
-   */
   generateRecommendations(tenantId: string): CostOptimizationRecommendation[] {
     const records = this.getCostRecords(tenantId);
     const recommendations: CostOptimizationRecommendation[] = [];
 
-    // Analyze OpenAI costs
-    const openAICosts = records.filter(r => r.service === 'openai');
+    const openAICosts = records.filter((r) => r.service === 'openai');
     if (openAICosts.length > 0) {
       const totalOpenAICost = openAICosts.reduce((sum, r) => sum + r.totalCost, 0);
       if (totalOpenAICost > 100) {
@@ -309,8 +274,7 @@ export class CostManagementService {
       }
     }
 
-    // Analyze storage costs
-    const storageCosts = records.filter(r => r.service === 'storage');
+    const storageCosts = records.filter((r) => r.service === 'storage');
     if (storageCosts.length > 0) {
       recommendations.push({
         id: uuidv4(),
@@ -324,7 +288,6 @@ export class CostManagementService {
       });
     }
 
-    // Suggest budget if none exists
     const budgets = this.getBudgets(tenantId);
     if (budgets.length === 0) {
       recommendations.push({
@@ -339,12 +302,13 @@ export class CostManagementService {
       });
     }
 
+    for (const rec of recommendations) {
+      this.recommendations.set(rec.id, rec);
+    }
+
     return recommendations;
   }
 
-  /**
-   * Apply a recommendation
-   */
   applyRecommendation(id: string): boolean {
     const recommendation = this.recommendations.get(id);
     if (!recommendation) return false;
@@ -356,12 +320,10 @@ export class CostManagementService {
 
   /**
    * Get all recommendations
+   * 
+   * @param _tenantId - Tenant ID (reserved for future filtering)
    */
-  getRecommendations(tenantId: string): CostOptimizationRecommendation[] {
-    const result: CostOptimizationRecommendation[] = [];
-    for (const rec of this.recommendations.values()) {
-      result.push(rec);
-    }
-    return result;
+  getRecommendations(_tenantId: string): CostOptimizationRecommendation[] {
+    return Array.from(this.recommendations.values());
   }
   }
