@@ -1,14 +1,7 @@
 /**
  * VYENFITA Audit Trail Service
  * 
- * Comprehensive audit trail for compliance
- * - User actions
- * - System events
- * - Security events
- * - Data changes
- * - Access logs
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -40,6 +33,7 @@ export interface AuditFilter {
   eventType?: AuditEvent['eventType'];
   status?: AuditEvent['status'];
   resource?: string;
+  resourceId?: string;
   startDate?: Date;
   endDate?: Date;
   limit?: number;
@@ -52,10 +46,7 @@ export interface AuditSummary {
   byStatus: Record<string, number>;
   byUser: Record<string, number>;
   byResource: Record<string, number>;
-  period: {
-    start: Date;
-    end: Date;
-  };
+  period: { start: Date; end: Date };
 }
 
 export class AuditTrailService {
@@ -67,9 +58,6 @@ export class AuditTrailService {
     this.retentionDays = retentionDays;
   }
 
-  /**
-   * Log an audit event
-   */
   logEvent(event: Omit<AuditEvent, 'id' | 'timestamp'>): AuditEvent {
     const auditEvent: AuditEvent = {
       id: uuidv4(),
@@ -78,48 +66,27 @@ export class AuditTrailService {
     };
 
     this.events.set(auditEvent.id, auditEvent);
-
-    // Cleanup old events if needed
     this.cleanupOldEvents();
 
     return auditEvent;
   }
 
-  /**
-   * Get events with filters
-   */
   getEvents(filter: AuditFilter): { events: AuditEvent[]; total: number } {
     let result = Array.from(this.events.values());
 
-    // Apply filters
-    if (filter.userId) {
-      result = result.filter(e => e.userId === filter.userId);
-    }
-    if (filter.tenantId) {
-      result = result.filter(e => e.tenantId === filter.tenantId);
-    }
-    if (filter.eventType) {
-      result = result.filter(e => e.eventType === filter.eventType);
-    }
-    if (filter.status) {
-      result = result.filter(e => e.status === filter.status);
-    }
-    if (filter.resource) {
-      result = result.filter(e => e.resource === filter.resource);
-    }
-    if (filter.startDate) {
-      result = result.filter(e => e.timestamp >= filter.startDate!);
-    }
-    if (filter.endDate) {
-      result = result.filter(e => e.timestamp <= filter.endDate!);
-    }
+    if (filter.userId) result = result.filter((e) => e.userId === filter.userId);
+    if (filter.tenantId) result = result.filter((e) => e.tenantId === filter.tenantId);
+    if (filter.eventType) result = result.filter((e) => e.eventType === filter.eventType);
+    if (filter.status) result = result.filter((e) => e.status === filter.status);
+    if (filter.resource) result = result.filter((e) => e.resource === filter.resource);
+    if (filter.resourceId) result = result.filter((e) => e.resourceId === filter.resourceId);
+    if (filter.startDate) result = result.filter((e) => e.timestamp >= filter.startDate!);
+    if (filter.endDate) result = result.filter((e) => e.timestamp <= filter.endDate!);
 
     const total = result.length;
 
-    // Sort by timestamp (newest first)
     result = result.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
-    // Apply pagination
     if (filter.limit) {
       const offset = filter.offset || 0;
       result = result.slice(offset, offset + filter.limit);
@@ -128,17 +95,11 @@ export class AuditTrailService {
     return { events: result, total };
   }
 
-  /**
-   * Get events for a specific user
-   */
   getUserEvents(userId: string, limit: number = 100): AuditEvent[] {
     const { events } = this.getEvents({ userId, limit });
     return events;
   }
 
-  /**
-   * Get events for a specific tenant
-   */
   getTenantEvents(tenantId: string, limit: number = 100): AuditEvent[] {
     const { events } = this.getEvents({ tenantId, limit });
     return events;
@@ -146,15 +107,20 @@ export class AuditTrailService {
 
   /**
    * Get events for a specific resource
+   * 
+   * @param resource - Resource type
+   * @param _resourceId - Resource ID (optional, reserved for future filtering)
+   * @param limit - Maximum events to return
    */
-  getResourceEvents(resource: string, resourceId?: string, limit: number = 100): AuditEvent[] {
+  getResourceEvents(
+    resource: string,
+    _resourceId?: string,
+    limit: number = 100
+  ): AuditEvent[] {
     const { events } = this.getEvents({ resource, limit });
     return events;
   }
 
-  /**
-   * Get audit summary
-   */
   getSummary(tenantId: string, startDate?: Date, endDate?: Date): AuditSummary {
     const { events } = this.getEvents({
       tenantId,
@@ -187,9 +153,6 @@ export class AuditTrailService {
     };
   }
 
-  /**
-   * Clean up old events
-   */
   private cleanupOldEvents(): void {
     const cutoff = new Date(Date.now() - this.retentionDays * 24 * 60 * 60 * 1000);
     let count = 0;
@@ -206,9 +169,6 @@ export class AuditTrailService {
     }
   }
 
-  /**
-   * Get user activity summary
-   */
   getUserActivitySummary(userId: string, days: number = 30): {
     totalEvents: number;
     lastActive: Date | null;
@@ -240,9 +200,6 @@ export class AuditTrailService {
     };
   }
 
-  /**
-   * Get security event summary
-   */
   getSecuritySummary(tenantId: string, days: number = 30): {
     totalSecurityEvents: number;
     failedLogins: number;
@@ -273,7 +230,10 @@ export class AuditTrailService {
         else failedLogins++;
       }
 
-      if (event.action === 'suspicious_activity' || event.action === 'security_alert') {
+      if (
+        event.action === 'suspicious_activity' ||
+        event.action === 'security_alert'
+      ) {
         suspiciousEvents++;
       }
     }
@@ -292,4 +252,4 @@ export class AuditTrailService {
       topIPs,
     };
   }
-    }
+                    }
