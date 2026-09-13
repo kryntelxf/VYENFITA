@@ -23,9 +23,9 @@ import { createEnterpriseRouter } from './routes/enterprise.routes';
 import { createDeploymentRouter } from './routes/deployment.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import { createAgentRouter } from './routes/agent.routes';
-import { createTriggerRouter } from './routes/trigger.routes';
-import { createWebhookReceiverRouter } from './routes/webhook.routes';
 import { createBIRouter } from './routes/bi.routes';
+import { createSSORouter } from './routes/sso.routes';
+import { createSCIMRouter } from './routes/scim.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -39,9 +39,8 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 // ============================================================
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
-import { logger } from './lib/observability/logger';
-import { HealthService } from './lib/observability/health.service';
 import { getSchedulerService } from './lib/workflow/scheduler.service';
+import { logger } from './lib/observability/logger';
 
 // ============================================================
 // ENV
@@ -72,7 +71,7 @@ logger.info(`Auth keys: ${apiKeys.length > 0 ? 'enabled' : 'disabled (dev mode)'
 // INITIALIZE WORKFLOW ENGINE (legacy — kept for backward compat)
 // ============================================================
 
-const workflowEngine = new WorkflowEngine();
+const workflowEngine = new WorkflowEngine(logger);
 logger.info('Legacy Workflow Engine initialized');
 
 // ============================================================
@@ -140,8 +139,11 @@ app.use('/', createObservabilityRouter());
 // Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
 
-// Webhook receiver (public, HMAC-verified internally)
-app.use('/api/v1/webhooks', createWebhookReceiverRouter());
+// SSO endpoints (/api/v1/auth/sso/*)
+// Note: SSO router internally handles both public (login, callback) and
+// protected (manage providers) routes, so it is NOT wrapped with
+// protectedMiddleware here.
+app.use('/api/v1/auth/sso', createSSORouter());
 
 // ============================================================
 // PROTECTED ROUTES (auth + tenant isolation)
@@ -173,11 +175,11 @@ app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter())
 // AI Agents (Requirement, Architecture, Testing, Code Review)
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
 
-// Triggers + Approvals
-app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
-
-// Business Intelligence (NL to SQL, Anomaly Detection, Chart Recommend)
+// Business Intelligence (NL to SQL, charts, anomalies)
 app.use('/api/v1/bi', ...protectedMiddleware, createBIRouter());
+
+// SCIM 2.0 (user provisioning from IdP)
+app.use('/api/v1/scim/v2', ...protectedMiddleware, createSCIMRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -242,6 +244,7 @@ const server = app.listen(port, host, () => {
 
   logger.info('📋 API Routes:', {
     auth: '/api/v1/auth',
+    sso: '/api/v1/auth/sso',
     ai: '/api/v1/ai',
     applications: '/api/v1/applications',
     workflows: '/api/v1/workflows',
@@ -250,18 +253,14 @@ const server = app.listen(port, host, () => {
     enterprise: '/api/v1/enterprise',
     deployments: '/api/v1/deployments',
     agents: '/api/v1/agents',
-    triggers: '/api/v1/workflows/:id/triggers',
-    approvals: '/api/v1/approvals',
-    webhooks: '/api/v1/webhooks/inbound/*',
-    businessIntelligence: '/api/v1/bi',
+    bi: '/api/v1/bi',
+    scim: '/api/v1/scim/v2',
   });
 
-  // ============================================================
-  // START SCHEDULER
-  // ============================================================
+  // Start scheduler after server is up
   const scheduler = getSchedulerService();
   scheduler.start();
-  logger.info('⏰ Workflow Scheduler started');
+  logger.info('📅 Workflow scheduler started');
 });
 
 // ============================================================
@@ -283,7 +282,7 @@ const shutdown = async (signal: string) => {
   try {
     const scheduler = getSchedulerService();
     scheduler.stop();
-    logger.info('Scheduler stopped');
+    logger.info('Workflow scheduler stopped');
   } catch (error) {
     logger.warn('Error stopping scheduler', {
       error: error instanceof Error ? error.message : 'Unknown',
