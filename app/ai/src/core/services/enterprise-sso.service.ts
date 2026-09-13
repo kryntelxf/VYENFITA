@@ -1,13 +1,7 @@
 /**
  * VYENFITA Enterprise SSO Service
  * 
- * Manages Single Sign-On for enterprise users
- * - SAML 2.0
- * - OIDC
- * - OAuth 2.0
- * - LDAP
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -24,7 +18,6 @@ export interface SSOProvider {
 }
 
 export interface SSOConfig {
-  // SAML
   saml?: {
     entryPoint: string;
     issuer: string;
@@ -33,7 +26,6 @@ export interface SSOConfig {
     privateKey: string;
     signatureAlgorithm: string;
   };
-  // OIDC
   oidc?: {
     clientId: string;
     clientSecret: string;
@@ -43,7 +35,6 @@ export interface SSOConfig {
     jwksUri: string;
     scope: string;
   };
-  // OAuth2
   oauth2?: {
     clientId: string;
     clientSecret: string;
@@ -51,7 +42,6 @@ export interface SSOConfig {
     tokenEndpoint: string;
     scope: string;
   };
-  // LDAP
   ldap?: {
     url: string;
     bindDN: string;
@@ -98,15 +88,10 @@ export class EnterpriseSSOService {
     this.users = new Map();
     this.jwtSecret = jwtSecret;
 
-    // Initialize default providers
     this.initializeDefaultProviders();
   }
 
-  /**
-   * Initialize default SSO providers
-   */
   private initializeDefaultProviders(): void {
-    // Google OIDC (example)
     this.providers.set('google', {
       id: 'google',
       name: 'Google',
@@ -127,7 +112,6 @@ export class EnterpriseSSOService {
       updatedAt: new Date(),
     });
 
-    // GitHub OAuth2 (example)
     this.providers.set('github', {
       id: 'github',
       name: 'GitHub',
@@ -147,9 +131,6 @@ export class EnterpriseSSOService {
     });
   }
 
-  /**
-   * Register a new SSO provider
-   */
   registerProvider(
     name: string,
     type: SSOProvider['type'],
@@ -169,23 +150,14 @@ export class EnterpriseSSOService {
     return provider;
   }
 
-  /**
-   * Get all SSO providers
-   */
   getProviders(): SSOProvider[] {
     return Array.from(this.providers.values());
   }
 
-  /**
-   * Get a specific provider
-   */
   getProvider(id: string): SSOProvider | undefined {
     return this.providers.get(id);
   }
 
-  /**
-   * Enable/disable a provider
-   */
   toggleProvider(id: string, enabled: boolean): boolean {
     const provider = this.providers.get(id);
     if (!provider) return false;
@@ -196,9 +168,6 @@ export class EnterpriseSSOService {
     return true;
   }
 
-  /**
-   * Get the authorization URL for a provider
-   */
   getAuthorizationUrl(providerId: string, redirectUri: string, state: string): string {
     const provider = this.providers.get(providerId);
     if (!provider) {
@@ -221,7 +190,6 @@ export class EnterpriseSSOService {
         return `${config.authorizationEndpoint}?client_id=${config.clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${config.scope}&state=${state}`;
       }
       case 'saml': {
-        // SAML requires a more complex flow
         return provider.config.saml?.entryPoint || '';
       }
       default:
@@ -229,9 +197,6 @@ export class EnterpriseSSOService {
     }
   }
 
-  /**
-   * Handle callback from SSO provider
-   */
   async handleCallback(
     providerId: string,
     code: string,
@@ -244,10 +209,8 @@ export class EnterpriseSSOService {
       throw new Error(`Provider ${providerId} not found`);
     }
 
-    // Exchange code for user info
     const userInfo = await this.exchangeCode(provider, code, redirectUri);
 
-    // Find or create user
     let user = this.findUserByProvider(providerId, userInfo.id);
     if (!user) {
       user = this.createUser(
@@ -262,7 +225,6 @@ export class EnterpriseSSOService {
       );
     }
 
-    // Create session
     const token = jwt.sign(
       { userId: user.id, email: user.email, provider: providerId },
       this.jwtSecret,
@@ -287,11 +249,15 @@ export class EnterpriseSSOService {
 
   /**
    * Exchange authorization code for user info
+   * 
+   * @param _provider - SSO provider (used for future real implementation)
+   * @param _code - Authorization code
+   * @param _redirectUri - Redirect URI
    */
   private async exchangeCode(
-    provider: SSOProvider,
-    code: string,
-    redirectUri: string
+    _provider: SSOProvider,
+    _code: string,
+    _redirectUri: string
   ): Promise<any> {
     // In production, this would make actual API calls
     // For now, we return mock data
@@ -306,10 +272,10 @@ export class EnterpriseSSOService {
     };
   }
 
-  /**
-   * Find user by provider ID
-   */
-  private findUserByProvider(providerId: string, providerIdValue: string): SSOUser | undefined {
+  private findUserByProvider(
+    providerId: string,
+    providerIdValue: string
+  ): SSOUser | undefined {
     for (const user of this.users.values()) {
       if (user.providerId === providerIdValue && user.provider === providerId) {
         return user;
@@ -318,9 +284,6 @@ export class EnterpriseSSOService {
     return undefined;
   }
 
-  /**
-   * Create a new SSO user
-   */
   private createUser(
     provider: string,
     providerId: string,
@@ -347,9 +310,6 @@ export class EnterpriseSSOService {
     return user;
   }
 
-  /**
-   * Validate SSO token
-   */
   validateToken(token: string): { userId: string; email: string; provider: string } | null {
     try {
       return jwt.verify(token, this.jwtSecret) as any;
@@ -358,16 +318,10 @@ export class EnterpriseSSOService {
     }
   }
 
-  /**
-   * Revoke SSO session
-   */
   revokeSession(sessionId: string): boolean {
     return this.sessions.delete(sessionId);
   }
 
-  /**
-   * Get all sessions for a user
-   */
   getSessions(userId: string): SSOSession[] {
     const result: SSOSession[] = [];
     for (const session of this.sessions.values()) {
@@ -378,9 +332,6 @@ export class EnterpriseSSOService {
     return result;
   }
 
-  /**
-   * Get provider by type
-   */
   getProvidersByType(type: SSOProvider['type']): SSOProvider[] {
     const result: SSOProvider[] = [];
     for (const provider of this.providers.values()) {
@@ -391,10 +342,7 @@ export class EnterpriseSSOService {
     return result;
   }
 
-  /**
-   * Delete a provider
-   */
   deleteProvider(id: string): boolean {
     return this.providers.delete(id);
   }
-}
+  }
