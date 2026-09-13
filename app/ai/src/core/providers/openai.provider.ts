@@ -1,9 +1,7 @@
 /**
  * VYENFITA OpenAI Provider
  * 
- * Implements the AIProvider interface for OpenAI API
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { OpenAI } from 'openai';
@@ -107,18 +105,30 @@ export class OpenAIProvider implements AIProvider {
       for await (const chunk of response) {
         yield {
           id: chunk.id,
-          choices: chunk.choices.map((choice) => ({
-            index: choice.index,
-            message: {
-              role: 'assistant',
-              content: choice.delta?.content || '',
-            },
-            finishReason: choice.finish_reason || '',
-            delta: {
-              content: choice.delta?.content || '',
-              function_call: choice.delta?.function_call || undefined,
-            },
-          })),
+          choices: chunk.choices.map((choice) => {
+            // Cast function_call to any to avoid OpenAI SDK type mismatch
+            const functionCall = choice.delta?.function_call as
+              | { name?: string; arguments?: string }
+              | undefined;
+
+            return {
+              index: choice.index,
+              message: {
+                role: 'assistant' as const,
+                content: choice.delta?.content || '',
+              },
+              finishReason: choice.finish_reason || '',
+              delta: {
+                content: choice.delta?.content || '',
+                function_call: functionCall
+                  ? {
+                      name: functionCall.name || '',
+                      arguments: functionCall.arguments || '',
+                    }
+                  : undefined,
+              },
+            };
+          }),
           created: chunk.created || Date.now(),
           model: chunk.model || '',
           done: false,
@@ -272,4 +282,4 @@ export class OpenAIProvider implements AIProvider {
     }
     return String(error);
   }
-          }
+        }
