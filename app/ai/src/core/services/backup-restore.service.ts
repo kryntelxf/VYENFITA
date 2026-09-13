@@ -1,19 +1,11 @@
 /**
  * VYENFITA Backup & Restore Service
  * 
- * Manages backups and restores
- * - Backup applications
- * - Restore applications
- * - Backup scheduling
- * - Backup verification
- * - Disaster recovery
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { ApplicationSpec } from '../schemas/application-spec.schema';
-import { ExportImportService } from './export-import.service';
 
 export interface Backup {
   id: string;
@@ -51,17 +43,12 @@ export interface BackupSchedule {
 export class BackupRestoreService {
   private backups: Map<string, Backup>;
   private schedules: Map<string, BackupSchedule>;
-  private exportImportService: ExportImportService;
 
   constructor() {
     this.backups = new Map();
     this.schedules = new Map();
-    this.exportImportService = new ExportImportService();
   }
 
-  /**
-   * Create a backup
-   */
   createBackup(
     applicationId: string,
     version: string,
@@ -80,20 +67,15 @@ export class BackupRestoreService {
       size: JSON.stringify(spec).length,
       checksum: this.generateChecksum(spec),
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       status: 'completed',
-      metadata: {
-        ...metadata,
-      },
+      metadata: { ...metadata },
     };
 
     this.backups.set(backup.id, backup);
     return backup;
   }
 
-  /**
-   * Restore from backup
-   */
   restoreBackup(
     backupId: string,
     restoredBy: string
@@ -111,7 +93,6 @@ export class BackupRestoreService {
       return { success: false, error: 'Backup has expired' };
     }
 
-    // Mark as restored
     backup.status = 'restored';
     backup.restorePoint = {
       restoredAt: new Date(),
@@ -119,17 +100,12 @@ export class BackupRestoreService {
     };
     this.backups.set(backupId, backup);
 
-    // In production, this would actually restore the data
-    // For now, we just return success
     return {
       success: true,
-      spec: {} as ApplicationSpec, // Placeholder
+      spec: {} as ApplicationSpec,
     };
   }
 
-  /**
-   * Get all backups for an application
-   */
   getBackups(applicationId: string): Backup[] {
     const result: Backup[] = [];
     for (const backup of this.backups.values()) {
@@ -140,23 +116,14 @@ export class BackupRestoreService {
     return result.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  /**
-   * Get a specific backup
-   */
   getBackup(id: string): Backup | undefined {
     return this.backups.get(id);
   }
 
-  /**
-   * Delete a backup
-   */
   deleteBackup(id: string): boolean {
     return this.backups.delete(id);
   }
 
-  /**
-   * Create a backup schedule
-   */
   createSchedule(
     applicationId: string,
     frequency: BackupSchedule['frequency'],
@@ -177,9 +144,6 @@ export class BackupRestoreService {
     return schedule;
   }
 
-  /**
-   * Update a backup schedule
-   */
   updateSchedule(
     id: string,
     updates: Partial<BackupSchedule>
@@ -196,9 +160,6 @@ export class BackupRestoreService {
     return schedule;
   }
 
-  /**
-   * Get schedules for an application
-   */
   getSchedules(applicationId: string): BackupSchedule[] {
     const result: BackupSchedule[] = [];
     for (const schedule of this.schedules.values()) {
@@ -209,20 +170,11 @@ export class BackupRestoreService {
     return result;
   }
 
-  /**
-   * Delete a schedule
-   */
   deleteSchedule(id: string): boolean {
     return this.schedules.delete(id);
   }
 
-  /**
-   * Execute scheduled backups
-   */
-  executeScheduledBackups(): {
-    executed: string[];
-    failed: string[];
-  } {
+  executeScheduledBackups(): { executed: string[]; failed: string[] } {
     const executed: string[] = [];
     const failed: string[] = [];
 
@@ -231,8 +183,6 @@ export class BackupRestoreService {
       if (!schedule.enabled) continue;
       if (schedule.nextBackupAt <= now) {
         try {
-          // In production, this would actually create a backup
-          // For now, we just simulate success
           schedule.lastBackupAt = now;
           schedule.nextBackupAt = this.calculateNextBackupTime(schedule.frequency);
           this.schedules.set(schedule.id, schedule);
@@ -243,15 +193,11 @@ export class BackupRestoreService {
       }
     }
 
-    // Clean up expired backups
     this.cleanupExpiredBackups();
 
     return { executed, failed };
   }
 
-  /**
-   * Clean up expired backups
-   */
   private cleanupExpiredBackups(): void {
     const now = new Date();
     for (const [id, backup] of this.backups) {
@@ -261,9 +207,6 @@ export class BackupRestoreService {
     }
   }
 
-  /**
-   * Calculate next backup time
-   */
   private calculateNextBackupTime(frequency: BackupSchedule['frequency']): Date {
     const now = new Date();
     switch (frequency) {
@@ -278,23 +221,17 @@ export class BackupRestoreService {
     }
   }
 
-  /**
-   * Generate checksum for verification
-   */
   private generateChecksum(spec: ApplicationSpec): string {
     const str = JSON.stringify(spec);
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash;
     }
     return hash.toString(16);
   }
 
-  /**
-   * Get backup statistics
-   */
   getBackupStats(applicationId: string): {
     total: number;
     totalSize: number;
@@ -327,4 +264,4 @@ export class BackupRestoreService {
       averageSize: totalSize / total,
     };
   }
-  }
+      }
