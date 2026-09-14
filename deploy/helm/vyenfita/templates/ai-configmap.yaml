@@ -1,0 +1,36 @@
+{{- if .Values.ai.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vyenfita.fullname" . }}-ai-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vyenfita.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.ai.config.nodeEnv | quote }}
+  AI_SERVICE_PORT: "3001"
+  AI_SERVICE_HOST: "0.0.0.0"
+  AI_LOG_LEVEL: {{ .Values.ai.config.logLevel | quote }}
+  AI_ENABLE_CACHING: {{ .Values.ai.config.enableCaching | quote }}
+  AI_CACHE_TTL: {{ .Values.ai.config.cacheTtl | quote }}
+  AI_RATE_LIMIT_ENABLED: {{ .Values.ai.config.rateLimitEnabled | quote }}
+  AI_RATE_LIMIT_MAX_REQUESTS: {{ .Values.ai.config.rateLimitMaxRequests | quote }}
+  AI_RATE_LIMIT_WINDOW_MS: {{ .Values.ai.config.rateLimitWindowMs | quote }}
+  AI_MAX_CONCURRENT_REQUESTS: {{ .Values.ai.config.maxConcurrentRequests | quote }}
+  AI_REQUEST_TIMEOUT_MS: {{ .Values.ai.config.requestTimeoutMs | quote }}
+  AI_RETRY_ATTEMPTS: {{ .Values.ai.config.retryAttempts | quote }}
+  AI_RETRY_BACKOFF_MS: {{ .Values.ai.config.retryBackoffMs | quote }}
+  AI_CIRCUIT_BREAKER_FAILURE_THRESHOLD: {{ .Values.ai.config.circuitBreakerFailureThreshold | quote }}
+  AI_CIRCUIT_BREAKER_TIMEOUT_MS: {{ .Values.ai.config.circuitBreakerTimeoutMs | quote }}
+  SCHEDULER_ENABLED: {{ .Values.ai.config.schedulerEnabled | quote }}
+  SCHEDULER_POLL_INTERVAL_MS: {{ .Values.ai.config.schedulerPollIntervalMs | quote }}
+  AI_ENABLE_METRICS: {{ .Values.ai.config.enableMetrics | quote }}
+  AI_METRICS_PORT: {{ .Values.ai.config.metricsPort | quote }}
+  AI_ENABLE_AUDIT_LOGS: {{ .Values.ai.config.enableAuditLogs | quote }}
+  AI_LOG_FILE_PATH: "/app/logs/ai-service.log"
+  SERVICE_VERSION: {{ .Values.ai.config.serviceVersion | quote }}
+  APPSMITH_API_URL: {{ .Values.ai.config.appsmithApiUrl | quote }}
+  AI_ENABLE_APPLICATION_GENERATION: {{ .Values.ai.config.enableApplicationGeneration | quote }}
+  AI_ENABLE_WORKFLOW_GENERATION: {{ .Values.ai.config.enableWorkflowGeneration | quote }}
+  AI_ENABLE_AUTOMATION: {{ .Values.ai.config.enableAutomation | quote }}
+{{- end }}
