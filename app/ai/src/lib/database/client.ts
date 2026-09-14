@@ -1,22 +1,11 @@
 /**
  * VYENFITA Database Client
  * 
- * Production-grade database client with:
- * - Connection pooling
- * - Graceful shutdown
- * - Health check
- * - Transaction support
- * - Query logging
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { PrismaClient, Prisma } from '@prisma/client';
 import winston from 'winston';
-
-// ============================================================
-// LOGGER
-// ============================================================
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -24,32 +13,11 @@ const logger = winston.createLogger({
     winston.format.timestamp(),
     winston.format.json()
   ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
-    }),
-  ],
+  transports: [new winston.transports.Console()],
 });
 
 // ============================================================
-// PRISMA CLIENT CONFIGURATION
-// ============================================================
-
-const prismaClientOptions: Prisma.PrismaClientOptions = {
-  log: [
-    { level: 'query', emit: 'event' },
-    { level: 'info', emit: 'event' },
-    { level: 'warn', emit: 'event' },
-    { level: 'error', emit: 'event' },
-  ],
-  errorFormat: 'pretty',
-};
-
-// ============================================================
-// CLIENT SINGLETON
+// PRISMA CLIENT SINGLETON
 // ============================================================
 
 declare global {
@@ -57,24 +25,29 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
-/**
- * Get Prisma client singleton
- * In development, store in globalThis to prevent hot-reload duplicates
- * In production, create fresh instance
- */
 export const prisma: PrismaClient =
   globalThis.__prisma ??
-  new PrismaClient(prismaClientOptions);
+  new PrismaClient({
+    log: [
+      { level: 'query', emit: 'event' },
+      { level: 'info', emit: 'event' },
+      { level: 'warn', emit: 'event' },
+      { level: 'error', emit: 'event' },
+    ],
+    errorFormat: 'pretty',
+  });
 
 if (process.env.NODE_ENV !== 'production') {
   globalThis.__prisma = prisma;
 }
 
 // ============================================================
-// EVENT LOGGING
+// EVENT LOGGING (using any cast to avoid Prisma type issues)
 // ============================================================
 
-prisma.$on('query', (e: Prisma.QueryEvent) => {
+const prismaAny = prisma as any;
+
+prismaAny.$on('query', (e: any) => {
   if (process.env.LOG_LEVEL === 'debug') {
     logger.debug('Query', {
       query: e.query,
@@ -83,7 +56,6 @@ prisma.$on('query', (e: Prisma.QueryEvent) => {
     });
   }
 
-  // Warn on slow queries
   if (e.duration > 1000) {
     logger.warn('Slow query detected', {
       query: e.query,
@@ -92,15 +64,15 @@ prisma.$on('query', (e: Prisma.QueryEvent) => {
   }
 });
 
-prisma.$on('info', (e: Prisma.LogEvent) => {
+prismaAny.$on('info', (e: any) => {
   logger.info('Database info', { message: e.message });
 });
 
-prisma.$on('warn', (e: Prisma.LogEvent) => {
+prismaAny.$on('warn', (e: any) => {
   logger.warn('Database warning', { message: e.message });
 });
 
-prisma.$on('error', (e: Prisma.LogEvent) => {
+prismaAny.$on('error', (e: any) => {
   logger.error('Database error', { message: e.message });
 });
 
@@ -163,9 +135,6 @@ export type TransactionClient = Omit<
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
-/**
- * Execute a callback within a transaction
- */
 export async function withTransaction<T>(
   callback: (tx: TransactionClient) => Promise<T>,
   options?: {
@@ -174,7 +143,7 @@ export async function withTransaction<T>(
     isolationLevel?: Prisma.TransactionIsolationLevel;
   }
 ): Promise<T> {
-  return prisma.$transaction(callback, {
+  return prisma.$transaction(callback as any, {
     maxWait: options?.maxWait ?? 5000,
     timeout: options?.timeout ?? 30000,
     isolationLevel: options?.isolationLevel,
@@ -185,9 +154,6 @@ export async function withTransaction<T>(
 // RETRY HELPERS
 // ============================================================
 
-/**
- * Retry a database operation with exponential backoff
- */
 export async function withRetry<T>(
   operation: () => Promise<T>,
   options?: {
@@ -209,7 +175,6 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      // Check if error is retryable
       if (!isRetryableError(lastError)) {
         throw lastError;
       }
@@ -241,16 +206,13 @@ export async function withRetry<T>(
   throw lastError!;
 }
 
-/**
- * Check if error is retryable
- */
 function isRetryableError(error: Error): boolean {
   const retryableCodes = [
-    'P1001', // Can't reach database server
-    'P1002', // Database server timeout
-    'P1008', // Operations timed out
-    'P1017', // Server has closed the connection
-    'P2024', // Timed out fetching connection
+    'P1001',
+    'P1002',
+    'P1008',
+    'P1017',
+    'P2024',
     'ECONNREFUSED',
     'ETIMEDOUT',
     'ENOTFOUND',
@@ -261,9 +223,6 @@ function isRetryableError(error: Error): boolean {
   return retryableCodes.includes(errorCode);
 }
 
-/**
- * Sleep for a duration
- */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -287,8 +246,9 @@ process.on('SIGINT', async () => {
 });
 
 // ============================================================
-// EXPORTS
+// RE-EXPORT PRISMA TYPES
 // ============================================================
 
+export { PrismaClient };
 export { Prisma };
 export default prisma;
