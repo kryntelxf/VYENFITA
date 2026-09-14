@@ -1,0 +1,15 @@
+{{- if and .Values.ai.enabled .Values.ai.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "vyenfita.fullname" . }}-ai-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vyenfita.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.ai.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "vyenfita.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ai
+{{- end }}
