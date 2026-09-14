@@ -1,16 +1,7 @@
 /**
  * VYENFITA Business Intelligence Service
  * 
- * Orchestrates the full BI flow:
- * 1. User asks question in natural language
- * 2. AI generates SQL
- * 3. SQL is validated for safety
- * 4. Query is executed
- * 5. Chart is auto-recommended
- * 6. Anomalies are detected
- * 7. Results are returned
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import { prisma } from '../database/client';
@@ -66,15 +57,9 @@ export class BIService {
     this.secretService = new SecretService();
   }
 
-  /**
-   * Answer a natural language question
-   */
   async ask(input: AskQuestionInput): Promise<AskQuestionResult> {
     const startTime = Date.now();
 
-    // ============================================================
-    // STEP 1: Load data source
-    // ============================================================
     const dataSource = await prisma.secret.findFirst({
       where: {
         id: input.dataSourceId,
@@ -89,9 +74,6 @@ export class BIService {
 
     const config = this.mapToDataSourceConfig(dataSource);
 
-    // ============================================================
-    // STEP 2: Discover schema
-    // ============================================================
     let schemas: TableSchema[];
     try {
       schemas = await SchemaDiscoveryService.discover(config, this.secretService);
@@ -105,9 +87,6 @@ export class BIService {
       );
     }
 
-    // ============================================================
-    // STEP 3: Generate SQL from question
-    // ============================================================
     const sqlGeneration = await NLToSQLService.generate({
       tenantId: input.tenantId,
       userId: input.userId,
@@ -138,31 +117,19 @@ export class BIService {
       );
     }
 
-    // ============================================================
-    // STEP 4: Execute query
-    // ============================================================
     const data = await QueryExecutorService.execute(
       config,
       sqlGeneration.sql,
       this.secretService
     );
 
-    // ============================================================
-    // STEP 5: Recommend chart
-    // ============================================================
     const chart = ChartRecommender.recommend(data);
 
-    // ============================================================
-    // STEP 6: Detect anomalies (optional)
-    // ============================================================
     let anomalies: AnomalyResult | undefined;
     if (input.detectAnomalies !== false && data.rows.length > 10) {
       anomalies = this.detectAnomaliesInResult(data);
     }
 
-    // ============================================================
-    // STEP 7: Audit
-    // ============================================================
     const durationMs = Date.now() - startTime;
 
     await auditService.log({
@@ -201,10 +168,6 @@ export class BIService {
     };
   }
 
-  // ============================================================
-  // PRIVATE
-  // ============================================================
-
   private mapToDataSourceConfig(record: any): DataSourceConfig {
     const metadata = record.metadata as any;
 
@@ -226,7 +189,6 @@ export class BIService {
   }
 
   private detectAnomaliesInResult(data: QueryResult): AnomalyResult | undefined {
-    // Find first numeric column
     for (const col of data.columns) {
       const values = data.rows.map((r) => r[col]);
       const allNumbers = values.every(
@@ -255,4 +217,4 @@ export function getBIService(): BIService {
     instance = new BIService();
   }
   return instance;
-        }
+  }
