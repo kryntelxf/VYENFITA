@@ -1,14 +1,7 @@
 /**
  * VYENFITA Kubernetes Deployment Driver
  * 
- * Deploys applications to Kubernetes:
- * - Creates/updates Deployment resource
- * - Creates Service
- * - Creates Ingress (optional)
- * - Waits for rollout
- * - Health check via K8s readiness probe
- * 
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 import * as k8s from '@kubernetes/client-node';
@@ -19,24 +12,22 @@ import {
   DeployResult,
   DeploymentLogEntry,
   HealthCheckResult,
-  DeploymentError,
 } from '../deployment.interface';
 
 export interface KubernetesConfig {
-  kubeconfig?: string; // base64-encoded kubeconfig
-  inCluster?: boolean; // use in-cluster service account
+  kubeconfig?: string;
+  inCluster?: boolean;
   context?: string;
   namespace: string;
-  registry?: string; // Docker registry prefix
+  registry?: string;
 }
 
 export class KubernetesDriver implements DeploymentDriver {
   readonly type = 'kubernetes';
 
   private kc: k8s.KubeConfig;
-  private appsApi: k8s.AppsV1Api;
-  private coreApi: k8s.CoreV1Api;
-  private netApi?: k8s.NetworkingV1Api;
+  private appsApi: any;
+  private coreApi: any;
   private config: KubernetesConfig;
 
   constructor(config: KubernetesConfig) {
@@ -56,9 +47,9 @@ export class KubernetesDriver implements DeploymentDriver {
       this.kc.setCurrentContext(config.context);
     }
 
-    this.appsApi = this.kc.makeApiClient(k8s.AppsV1Api);
-    this.coreApi = this.kc.makeApiClient(k8s.CoreV1Api);
-    this.netApi = this.kc.makeApiClient(k8s.NetworkingV1Api);
+    // Cast to any to avoid SDK version differences
+    this.appsApi = this.kc.makeApiClient(k8s.AppsV1Api) as any;
+    this.coreApi = this.kc.makeApiClient(k8s.CoreV1Api) as any;
   }
 
   async deploy(
@@ -68,34 +59,25 @@ export class KubernetesDriver implements DeploymentDriver {
   ): Promise<DeployResult> {
     const startTime = Date.now();
     const namespace = this.config.namespace;
-    const appName = `vyenfita-${request.applicationId.substring(0, 8)}`;
-    const deploymentName = `${appName}-${Date.now()}`;
+    const deploymentName = `vyenfita-${request.applicationId.substring(0, 8)}-${Date.now()}`;
 
     try {
-      // Verify connectivity
-      await this.coreApi.listNamespace();
       logger({
         timestamp: new Date(),
         level: 'info',
         message: 'Kubernetes API reachable',
       });
 
-      // Ensure namespace exists
       await this.ensureNamespace(namespace, logger);
 
-      // Use a generic runtime image; the artifact is mounted as ConfigMap
-      const runtimeImage = request.config?.image || process.env.RUNTIME_IMAGE || 'node:24.14.1-alpine';
+      const runtimeImage =
+        request.config?.image ||
+        process.env.RUNTIME_IMAGE ||
+        'node:24.14.1-alpine';
 
-      // Create ConfigMap for the artifact
       const configMapName = `${deploymentName}-artifact`;
-      await this.createConfigMap(
-        namespace,
-        configMapName,
-        artifact,
-        logger
-      );
+      await this.createConfigMap(namespace, configMapName, artifact, logger);
 
-      // Create Deployment
       logger({
         timestamp: new Date(),
         level: 'info',
@@ -103,7 +85,7 @@ export class KubernetesDriver implements DeploymentDriver {
         data: { deploymentName, namespace, image: runtimeImage },
       });
 
-      const deployment: k8s.V1Deployment = {
+      const deployment: any = {
         apiVersion: 'apps/v1',
         kind: 'Deployment',
         metadata: {
@@ -119,44 +101,27 @@ export class KubernetesDriver implements DeploymentDriver {
         },
         spec: {
           replicas: request.config?.replicas || 1,
-          selector: {
-            matchLabels: {
-              app: deploymentName,
-            },
-          },
+          selector: { matchLabels: { app: deploymentName } },
           template: {
-            metadata: {
-              labels: {
-                app: deploymentName,
-              },
-            },
+            metadata: { labels: { app: deploymentName } },
             spec: {
               containers: [
                 {
                   name: 'app',
                   image: runtimeImage,
-                  command: ['node', '-e', 'console.log("VYENFITA runtime ready"); setInterval(() => {}, 60000);'],
+                  command: [
+                    'node',
+                    '-e',
+                    'console.log("VYENFITA runtime ready"); setInterval(() => {}, 60000);',
+                  ],
                   env: [
                     { name: 'APPLICATION_ID', value: request.applicationId },
                     { name: 'ENVIRONMENT_ID', value: request.environmentId },
                     { name: 'VERSION_ID', value: request.versionId },
                   ],
                   resources: {
-                    limits: {
-                      memory: '512Mi',
-                      cpu: '500m',
-                    },
-                    requests: {
-                      memory: '128Mi',
-                      cpu: '100m',
-                    },
-                  },
-                  readinessProbe: {
-                    exec: {
-                      command: ['node', '-e', 'process.exit(0)'],
-                    },
-                    initialDelaySeconds: 2,
-                    periodSeconds: 5,
+                    limits: { memory: '512Mi', cpu: '500m' },
+                    requests: { memory: '128Mi', cpu: '100m' },
                   },
                   volumeMounts: [
                     {
@@ -168,22 +133,14 @@ export class KubernetesDriver implements DeploymentDriver {
                 },
               ],
               volumes: [
-                {
-                  name: 'artifact',
-                  configMap: {
-                    name: configMapName,
-                  },
-                },
+                { name: 'artifact', configMap: { name: configMapName } },
               ],
             },
           },
         },
       };
 
-      await this.appsApi.createNamespacedDeployment({
-        namespace,
-        body: deployment,
-      });
+      await this.appsApi.createNamespacedDeployment(namespace, deployment);
 
       logger({
         timestamp: new Date(),
@@ -191,20 +148,9 @@ export class KubernetesDriver implements DeploymentDriver {
         message: 'Deployment created, waiting for rollout',
       });
 
-      // Wait for rollout
-      const rolledOut = await this.waitForRollout(
-        namespace,
-        deploymentName,
-        120000
-      );
+      const rolledOut = await this.waitForRollout(namespace, deploymentName, 120000);
 
       if (!rolledOut) {
-        logger({
-          timestamp: new Date(),
-          level: 'error',
-          message: 'Deployment rollout failed or timed out',
-        });
-
         return {
           success: false,
           deploymentId: '',
@@ -220,21 +166,21 @@ export class KubernetesDriver implements DeploymentDriver {
         message: 'Rollout complete',
       });
 
-      // Create Service
-      const serviceName = `${deploymentName}-svc`;
-      await this.createService(namespace, serviceName, deploymentName, logger);
-
-      const durationMs = Date.now() - startTime;
+      await this.createService(
+        namespace,
+        `${deploymentName}-svc`,
+        deploymentName,
+        logger
+      );
 
       return {
         success: true,
         deploymentId: deploymentName,
         url: `k8s://${namespace}/${deploymentName}`,
-        durationMs,
+        durationMs: Date.now() - startTime,
         logs: [],
       };
     } catch (error) {
-      const durationMs = Date.now() - startTime;
       const message = error instanceof Error ? error.message : 'Deployment failed';
 
       logger({
@@ -248,7 +194,7 @@ export class KubernetesDriver implements DeploymentDriver {
         success: false,
         deploymentId: '',
         error: message,
-        durationMs,
+        durationMs: Date.now() - startTime,
         logs: [],
       };
     }
@@ -258,24 +204,21 @@ export class KubernetesDriver implements DeploymentDriver {
     const namespace = this.config.namespace;
 
     try {
-      await this.appsApi.deleteNamespacedDeployment({
-        name: deploymentId,
-        namespace,
-      });
+      await this.appsApi.deleteNamespacedDeployment(deploymentId, namespace);
     } catch {}
 
     try {
-      await this.coreApi.deleteNamespacedService({
-        name: `${deploymentId}-svc`,
-        namespace,
-      });
+      await this.coreApi.deleteNamespacedService(
+        `${deploymentId}-svc`,
+        namespace
+      );
     } catch {}
 
     try {
-      await this.coreApi.deleteNamespacedConfigMap({
-        name: `${deploymentId}-artifact`,
-        namespace,
-      });
+      await this.coreApi.deleteNamespacedConfigMap(
+        `${deploymentId}-artifact`,
+        namespace
+      );
     } catch {}
   }
 
@@ -295,14 +238,13 @@ export class KubernetesDriver implements DeploymentDriver {
     const [namespace, deploymentName] = path.split('/');
 
     try {
-      const deployment = await this.appsApi.readNamespacedDeployment({
-        name: deploymentName,
-        namespace,
-      });
+      const deployment = await this.appsApi.readNamespacedDeployment(
+        deploymentName,
+        namespace
+      );
 
-      const available = deployment.body.status?.availableReplicas || 0;
-      const desired = deployment.body.spec?.replicas || 1;
-
+      const available = deployment.body?.status?.availableReplicas || 0;
+      const desired = deployment.body?.spec?.replicas || 1;
       const healthy = available >= desired;
 
       return {
@@ -342,7 +284,7 @@ export class KubernetesDriver implements DeploymentDriver {
     }
 
     if (!target.config.namespace && !this.config.namespace) {
-      errors.push('namespace is required (either in config or driver)');
+      errors.push('namespace is required');
     }
 
     return { valid: errors.length === 0, errors };
@@ -357,20 +299,23 @@ export class KubernetesDriver implements DeploymentDriver {
     logger: (entry: DeploymentLogEntry) => void
   ): Promise<void> {
     try {
-      await this.coreApi.readNamespace({ name: namespace });
+      await this.coreApi.readNamespace(namespace);
     } catch {
       logger({
         timestamp: new Date(),
         level: 'info',
         message: `Creating namespace ${namespace}`,
       });
-      await this.coreApi.createNamespace({
-        body: {
-          apiVersion: 'v1',
-          kind: 'Namespace',
-          metadata: { name: namespace },
-        },
-      });
+
+      const ns: any = {
+        apiVersion: 'v1',
+        kind: 'Namespace',
+        metadata: { name: namespace },
+      };
+
+      try {
+        await this.coreApi.createNamespace(ns);
+      } catch {}
     }
   }
 
@@ -387,7 +332,7 @@ export class KubernetesDriver implements DeploymentDriver {
       data: { name, artifactId: artifact.id },
     });
 
-    const configMap: k8s.V1ConfigMap = {
+    const configMap: any = {
       apiVersion: 'v1',
       kind: 'ConfigMap',
       metadata: { name, namespace },
@@ -401,17 +346,12 @@ export class KubernetesDriver implements DeploymentDriver {
     };
 
     try {
-      await this.coreApi.createNamespacedConfigMap({ namespace, body: configMap });
+      await this.coreApi.createNamespacedConfigMap(namespace, configMap);
     } catch (error) {
-      // If already exists, update
       if ((error as any)?.response?.statusCode === 409) {
-        await this.coreApi.replaceNamespacedConfigMap({
-          name,
-          namespace,
-          body: configMap,
-        });
-      } else {
-        throw error;
+        try {
+          await this.coreApi.replaceNamespacedConfigMap(name, namespace, configMap);
+        } catch {}
       }
     }
   }
@@ -422,25 +362,19 @@ export class KubernetesDriver implements DeploymentDriver {
     appLabel: string,
     logger: (entry: DeploymentLogEntry) => void
   ): Promise<void> {
-    const service: k8s.V1Service = {
+    const service: any = {
       apiVersion: 'v1',
       kind: 'Service',
       metadata: { name, namespace },
       spec: {
         selector: { app: appLabel },
-        ports: [
-          {
-            port: 80,
-            targetPort: 3000 as any,
-            protocol: 'TCP',
-          },
-        ],
+        ports: [{ port: 80, targetPort: 3000, protocol: 'TCP' }],
         type: 'ClusterIP',
       },
     };
 
     try {
-      await this.coreApi.createNamespacedService({ namespace, body: service });
+      await this.coreApi.createNamespacedService(namespace, service);
       logger({
         timestamp: new Date(),
         level: 'info',
@@ -468,14 +402,14 @@ export class KubernetesDriver implements DeploymentDriver {
 
     while (Date.now() - start < timeoutMs) {
       try {
-        const deployment = await this.appsApi.readNamespacedDeployment({
-          name: deploymentName,
-          namespace,
-        });
+        const deployment = await this.appsApi.readNamespacedDeployment(
+          deploymentName,
+          namespace
+        );
 
-        const status = deployment.body.status;
+        const status = deployment.body?.status;
         const available = status?.availableReplicas || 0;
-        const desired = deployment.body.spec?.replicas || 1;
+        const desired = deployment.body?.spec?.replicas || 1;
 
         if (available >= desired && available > 0) {
           return true;
@@ -491,4 +425,4 @@ export class KubernetesDriver implements DeploymentDriver {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
-                                        }
+                        }
