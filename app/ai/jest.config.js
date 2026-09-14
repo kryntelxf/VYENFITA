@@ -1,7 +1,7 @@
 /**
  * VYENFITA Jest Configuration
  * 
- * @version 1.0.1
+ * @version 2.0.0
  */
 
 /** @type {import('jest').Config} */
@@ -52,4 +52,9 @@ module.exports = {
   maxWorkers: 1,
   bail: false,
   errorOnDeprecated: false,
+  // Test organization
+  projects: undefined,
+  // Global setup
+  globalSetup: '<rootDir>/src/__tests__/global-setup.ts',
+  globalTeardown: '<rootDir>/src/__tests__/global-teardown.ts',
 };
