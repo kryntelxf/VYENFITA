@@ -1,0 +1,115 @@
+name: DR Drill
+
+on:
+  schedule:
+    # Weekly backup restore test — Sunday 2 AM UTC
+    - cron: '0 2 * * 0'
+    # Monthly full DR drill — 1st of month, 3 AM UTC
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+    inputs:
+      drill_type:
+        description: 'Type of DR drill'
+        required: true
+        default: 'backup-restore'
+        type: choice
+        options:
+          - backup-restore
+          - pod-kill
+          - db-failover
+          - full
+
+env:
+  AWS_REGION: us-east-1
+  STAGING_NAMESPACE: vyenfita-staging
+
+jobs:
+  drill:
+    name: Run DR Drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine drill type
+        id: drill
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            # Weekly = backup-restore; Monthly = full
+            if [ "$(date +%d)" == "01" ]; then
+              echo "type=full" >> $GITHUB_OUTPUT
+            else
+              echo "type=backup-restore" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "type=${{ github.event.inputs.drill_type }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Run DR drill
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          chmod +x deploy/scripts/dr-drill.sh
+          ./deploy/scripts/dr-drill.sh ${{ steps.drill.outputs.type }}
+
+      - name: Generate drill report
+        if: always()
+        run: |
+          cat > drill-report.md <<EOF
+          # DR Drill Report
+          
+          - **Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          - **Type:** ${{ steps.drill.outputs.type }}
+          - **Status:** ${{ job.status }}
+          - **Triggered by:** ${{ github.event_name }}
+          - **Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          cat drill-report.md
+
+      - name: Upload drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-drill-report-${{ github.run_number }}
+          path: drill-report.md
+          retention-days: 90
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          text: |
+            🔴 DR Drill FAILED
+            Type: ${{ steps.drill.outputs.type }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify Slack on success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          text: |
+            ✅ DR Drill PASSED
+            Type: ${{ steps.drill.outputs.type }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
