@@ -1,0 +1,29 @@
+{{- if and .Values.ai.enabled .Values.ai.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "vyenfita.fullname" . }}-ai-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vyenfita.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "vyenfita.fullname" . }}-ai
+  minReplicas: {{ .Values.ai.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.ai.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ai.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ai.autoscaling.targetMemoryUtilizationPercentage }}
+{{- end }}
