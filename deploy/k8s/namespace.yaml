@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vyenfita
+  labels:
+    name: vyenfita
+    app.kubernetes.io/name: vyenfita
+    app.kubernetes.io/part-of: vyenfita-platform
