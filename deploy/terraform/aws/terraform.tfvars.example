@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars and fill in
+aws_region              = "us-east-1"
+environment             = "prod"
+cluster_name            = "vyenfita-cluster"
+db_instance_class       = "db.t3.medium"
+db_allocated_storage    = 100
+db_password             = "REPLACE_WITH_SECURE_PASSWORD"
