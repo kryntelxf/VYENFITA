@@ -1,0 +1,131 @@
+name: Deploy to Production
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/vyenfita-ai
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./app/ai
+          file: ./app/ai/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' || github.event.inputs.environment == 'production'
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.29.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Verify cluster connection
+        run: kubectl cluster-info
+
+      - name: Apply namespace
+        run: kubectl apply -f deploy/k8s/namespace.yaml
+
+      - name: Apply ConfigMap
+        run: kubectl apply -f deploy/k8s/configmap.yaml
+
+      - name: Apply ServiceAccount
+        run: kubectl apply -f deploy/k8s/vyenfita-ai-serviceaccount.yaml
+
+      - name: Apply NetworkPolicy
+        run: kubectl apply -f deploy/k8s/vyenfita-ai-networkpolicy.yaml
+
+      - name: Deploy via Helm
+        run: |
+          helm upgrade --install vyenfita deploy/helm/vyenfita \
+            --namespace vyenfita \
+            --create-namespace \
+            --set ai.image.tag=${GITHUB_REF#refs/tags/} \
+            --wait \
+            --timeout 10m
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/vyenfita-ai -n vyenfita --timeout=5m
+          kubectl get pods -n vyenfita
+
+      - name: Smoke test
+        run: |
+          # Port-forward and test health
+          kubectl port-forward -n vyenfita svc/vyenfita-ai 3001:3001 &
+          sleep 5
+          curl -f http://localhost:3001/health || exit 1
+          curl -f http://localhost:3001/health/liveness || exit 1
+          curl -f http://localhost:3001/health/readiness || exit 1
+          kill %1 || true
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Check the logs above."
