@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+data:
+  vyenfita-alerts.yml: |
+    groups:
+      - name: vyenfita-alerts
+        interval: 30s
+        rules:
+          - alert: VyenfitaAIServiceDown
+            expr: up{job="vyenfita-ai"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "VYENFITA AI Service is down"
+              description: "Instance {{ $labels.instance }} has been down for 2 minutes"
+
+          - alert: VyenfitaHighErrorRate
+            expr: |
+              sum(rate(vyenfita_http_errors_total[5m])) by (tenant)
+              / sum(rate(vyenfita_http_requests_total[5m])) by (tenant) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High error rate for tenant {{ $labels.tenant }}"
+              description: "Error rate is {{ $value | humanizePercentage }}"
+
+          - alert: VyenfitaHighLatency
+            expr: |
+              histogram_quantile(0.95, sum(rate(vyenfita_http_request_duration_ms_bucket[5m])) by (le)) > 2000
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "P95 latency > 2s"
+              description: "P95 latency is {{ $value }}ms"
+
+          - alert: VyenfitaAIProviderDown
+            expr: vyenfita_ai_errors_total > 10
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "AI provider errors detected"
+              description: "{{ $value }} AI errors in the last 5 minutes"
+
+          - alert: VyenfitaPromptInjectionDetected
+            expr: increase(vyenfita_ai_prompt_injection_total[5m]) > 5
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Multiple prompt injection attempts detected"
+              description: "{{ $value }} attempts in the last 5 minutes"
+
+          - alert: VyenfitaHighMemoryUsage
+            expr: |
+              container_memory_working_set_bytes{namespace="vyenfita", container="vyenfita-ai"}
+              / container_spec_memory_limit_bytes{namespace="vyenfita", container="vyenfita-ai"} > 0.9
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Memory usage > 90%"
+              description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} memory"
+
+          - alert: VyenfitaWorkflowFailures
+            expr: |
+              rate(vyenfita_workflow_failures_total[5m])
+              / rate(vyenfita_workflow_executions_total[5m]) > 0.2
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High workflow failure rate"
+              description: "Failure rate is {{ $value | humanizePercentage }}"
