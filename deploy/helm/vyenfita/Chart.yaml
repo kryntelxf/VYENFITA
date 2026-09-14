@@ -1,0 +1,21 @@
+apiVersion: v2
+name: vyenfita
+description: VYENFITA — AI-Native Business Application & Automation Platform
+type: application
+version: 1.0.0
+appVersion: "3.0.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - vyenfita
+  - ai
+  - business-intelligence
+  - automation
+  - low-code
+home: https://github.com/kryntelxf/VYENFITA
+sources:
+  - https://github.com/kryntelxf/VYENFITA
+maintainers:
+  - name: VYENFITA Team
+    email: team@vyenfita.com
+annotations:
+  category: AI/Platform
