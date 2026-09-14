@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vyenfita-ai-pdb
+  namespace: vyenfita
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vyenfita-ai
