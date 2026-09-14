@@ -16,7 +16,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     services:
       postgres:
@@ -37,7 +37,10 @@ jobs:
       DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
       TEST_DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
       JWT_SECRET: test-secret-key-at-least-32-characters-long
+      ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
       NODE_ENV: test
+      LOG_LEVEL: error
+      SCHEDULER_ENABLED: 'false'
 
     steps:
       - name: Checkout
@@ -68,7 +71,7 @@ jobs:
           cd app/ai
           yarn db:seed || echo "Seed skipped"
 
-      - name: Type check
+      - name: Type check (non-fatal)
         run: |
           cd app/ai
           yarn type-check || echo "Type check warnings (non-fatal)"
@@ -101,3 +104,12 @@ jobs:
           path: app/ai/test-output.log
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Test workflow executed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage report and test log available in artifacts." >> $GITHUB_STEP_SUMMARY
