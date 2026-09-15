@@ -3,7 +3,7 @@
 // ============================================================
 // Production-grade schema for multi-tenant AI-native platform
 // 
-// @version 1.0.1
+// @version 1.1.0
 // ============================================================
 
 generator client {
@@ -35,7 +35,7 @@ model Tenant {
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
   
-  // Relations (users are linked via Membership, not directly)
+  // Relations
   memberships Membership[]
   applications Application[]
   workflows   Workflow[]
@@ -44,6 +44,7 @@ model Tenant {
   costRecords CostRecord[]
   deployments Deployment[]
   secrets     Secret[]
+  budgets     Budget[]
   
   @@index([slug])
   @@index([status])
@@ -539,6 +540,32 @@ model CostRecord {
   @@index([tenantId, timestamp])
   @@index([periodStart, periodEnd])
   @@map("cost_records")
+}
+
+/// Budget - spending limits per tenant
+model Budget {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  name            String   @db.VarChar(255)
+  service         String   @db.VarChar(50)
+  period          String   @db.VarChar(20)
+  limit           Float
+  current         Float    @default(0)
+  alertThresholds Json     @default("[50, 80, 100]") @map("alert_thresholds")
+  alertsSent      Json     @default("[]") @map("alerts_sent")
+  autoActions     Json     @default("{}") @map("auto_actions")
+  status          String   @default("active") @db.VarChar(50)
+  resetAt         DateTime @map("reset_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("budgets")
 }
 
 // ============================================================
