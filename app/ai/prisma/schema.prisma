@@ -3,7 +3,8 @@
 // ============================================================
 // Production-grade schema for multi-tenant AI-native platform
 // 
-// @version 2.0.0
+// @version 3.0.0
+// @since 0.1.0
 // ============================================================
 
 generator client {
@@ -30,24 +31,26 @@ model Tenant {
   status      String   @default("active") @db.VarChar(50)
   settings    Json     @default("{}")
   metadata    Json     @default("{}")
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
-  
+
   // Relations
-  memberships          Membership[]
-  applications         Application[]
-  workflows            Workflow[]
-  auditEvents          AuditEvent[]
-  usageRecords         UsageRecord[]
-  costRecords          CostRecord[]
-  deployments          Deployment[]
-  secrets              Secret[]
-  budgets              Budget[]
-  marketplaceInstalls  MarketplaceInstall[]
-  marketplaceReviews   MarketplaceReview[]
-  
+  memberships         Membership[]
+  applications        Application[]
+  workflows           Workflow[]
+  auditEvents         AuditEvent[]
+  usageRecords        UsageRecord[]
+  costRecords         CostRecord[]
+  deployments         Deployment[]
+  secrets             Secret[]
+  budgets             Budget[]
+  marketplaceInstalls MarketplaceInstall[]
+  marketplaceReviews  MarketplaceReview[]
+  agents              Agent[]
+  agentRuns           AgentRun[]
+
   @@index([slug])
   @@index([status])
   @@map("tenants")
@@ -62,25 +65,25 @@ model User {
   avatarUrl     String?   @map("avatar_url") @db.Text
   emailVerified Boolean   @default(false) @map("email_verified")
   status        String    @default("active") @db.VarChar(50)
-  
+
   ssoProvider   String?   @map("sso_provider") @db.VarChar(50)
   ssoProviderId String?   @map("sso_provider_id") @db.VarChar(255)
-  
+
   preferredLanguage String @default("en") @map("preferred_language") @db.VarChar(10)
   timezone          String @default("UTC") @db.VarChar(50)
-  
+
   lastLoginAt   DateTime? @map("last_login_at")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
   deletedAt     DateTime? @map("deleted_at")
-  
+
   // Relations
-  memberships    Membership[]
-  sessions       Session[]
-  auditEvents    AuditEvent[]
-  activityLogs   ActivityLog[]
-  creatorProfile MarketplaceAuthor?
-  
+  memberships   Membership[]
+  sessions      Session[]
+  auditEvents   AuditEvent[]
+  activityLogs  ActivityLog[]
+  marketplaceAuthor MarketplaceAuthor?
+
   @@index([email])
   @@index([status])
   @@index([ssoProvider, ssoProviderId])
@@ -97,16 +100,16 @@ model Membership {
   invitedBy String?  @map("invited_by") @db.Uuid
   invitedAt DateTime? @map("invited_at")
   joinedAt  DateTime? @map("joined_at")
-  
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
-  
+
   // Relations
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   role      Role     @relation(fields: [roleId], references: [id])
-  
+
   @@unique([userId, tenantId])
   @@index([tenantId])
   @@index([userId])
@@ -121,14 +124,14 @@ model Role {
   description String?  @db.Text
   isSystem    Boolean  @default(false) @map("is_system")
   isDefault   Boolean  @default(false) @map("is_default")
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   memberships Membership[]
   permissions RolePermission[]
-  
+
   @@unique([tenantId, name])
   @@index([tenantId])
   @@map("roles")
@@ -140,12 +143,12 @@ model Permission {
   resource    String   @db.VarChar(100)
   action      String   @db.VarChar(50)
   description String?  @db.Text
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
-  
+
   // Relations
   roles RolePermission[]
-  
+
   @@unique([resource, action])
   @@map("permissions")
 }
@@ -154,10 +157,10 @@ model Permission {
 model RolePermission {
   roleId       String @map("role_id") @db.Uuid
   permissionId String @map("permission_id") @db.Uuid
-  
+
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  
+
   @@id([roleId, permissionId])
   @@map("role_permissions")
 }
@@ -171,13 +174,13 @@ model Session {
   expiresAt    DateTime @map("expires_at")
   ipAddress    String?  @map("ip_address") @db.VarChar(45)
   userAgent    String?  @map("user_agent") @db.Text
-  
+
   createdAt    DateTime @default(now()) @map("created_at")
   revokedAt    DateTime? @map("revoked_at")
-  
+
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([userId])
   @@index([expiresAt])
   @@map("sessions")
@@ -195,23 +198,23 @@ model Application {
   description String?  @db.Text
   slug        String   @db.VarChar(100)
   status      String   @default("draft") @db.VarChar(50)
-  
+
   currentVersionId String? @map("current_version_id") @db.Uuid
-  
+
   metadata    Json     @default("{}")
   settings    Json     @default("{}")
   tags        String[] @default([])
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
-  
+
   // Relations
   tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   versions    ApplicationVersion[]
   environments Environment[]
   deployments Deployment[]
-  
+
   @@unique([tenantId, slug])
   @@index([tenantId])
   @@index([status])
@@ -227,12 +230,12 @@ model ApplicationVersion {
   changelog     String?  @db.Text
   createdBy     String?  @map("created_by") @db.Uuid
   isCurrent     Boolean  @default(false) @map("is_current")
-  
+
   createdAt     DateTime @default(now()) @map("created_at")
-  
+
   // Relations
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  
+
   @@unique([applicationId, version])
   @@index([applicationId])
   @@index([isCurrent])
@@ -249,13 +252,13 @@ model Environment {
   config        Json     @default("{}")
   variables     Json     @default("{}")
   isDefault     Boolean  @default(false) @map("is_default")
-  
+
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  
+
   @@unique([applicationId, name])
   @@index([applicationId])
   @@map("environments")
@@ -273,20 +276,20 @@ model Workflow {
   description String?  @db.Text
   slug        String   @db.VarChar(100)
   status      String   @default("draft") @db.VarChar(50)
-  
+
   currentVersionId String? @map("current_version_id") @db.Uuid
-  
+
   triggers    Json     @default("[]")
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
-  
+
   // Relations
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   versions   WorkflowVersion[]
   executions WorkflowExecution[]
-  
+
   @@unique([tenantId, slug])
   @@index([tenantId])
   @@index([status])
@@ -302,12 +305,12 @@ model WorkflowVersion {
   changelog   String?  @db.Text
   createdBy   String?  @map("created_by") @db.Uuid
   isCurrent   Boolean  @default(false) @map("is_current")
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
-  
+
   // Relations
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  
+
   @@unique([workflowId, version])
   @@index([workflowId])
   @@index([isCurrent])
@@ -321,30 +324,30 @@ model WorkflowExecution {
   versionId    String?  @map("version_id") @db.Uuid
   tenantId     String   @map("tenant_id") @db.Uuid
   status       String   @default("pending") @db.VarChar(50)
-  
+
   input        Json     @default("{}")
   output       Json     @default("{}")
   variables    Json     @default("{}")
-  
+
   currentStep  String?  @map("current_step") @db.VarChar(100)
   stepResults  Json     @default("[]")
-  
+
   error        String?  @db.Text
-  
+
   startedAt    DateTime? @map("started_at")
   completedAt  DateTime? @map("completed_at")
   duration     Int?
   retryCount   Int      @default(0) @map("retry_count")
-  
+
   triggeredBy  String?  @map("triggered_by") @db.Uuid
   triggerType  String   @default("manual") @map("trigger_type") @db.VarChar(50)
-  
+
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  
+
   @@index([workflowId])
   @@index([tenantId])
   @@index([status])
@@ -363,31 +366,31 @@ model Deployment {
   applicationId String   @map("application_id") @db.Uuid
   environmentId String   @map("environment_id") @db.Uuid
   versionId     String?  @map("version_id") @db.Uuid
-  
+
   status        String   @default("pending") @db.VarChar(50)
   platform      String   @db.VarChar(50)
-  
+
   config        Json     @default("{}")
   logs          Json     @default("[]")
-  
+
   healthStatus  String?  @map("health_status") @db.VarChar(50)
   healthChecks  Json     @default("[]")
-  
+
   startedAt     DateTime @default(now()) @map("started_at")
   completedAt   DateTime? @map("completed_at")
   duration      Int?
-  
+
   error         String?  @db.Text
-  
+
   triggeredBy   String?  @map("triggered_by") @db.Uuid
-  
+
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  
+
   @@index([applicationId])
   @@index([tenantId])
   @@index([status])
@@ -406,21 +409,21 @@ model Secret {
   description String?  @db.Text
   type        String   @db.VarChar(50)
   provider    String?  @db.VarChar(50)
-  
+
   vaultPath   String?  @map("vault_path") @db.Text
   metadata    Json     @default("{}")
-  
+
   rotationEnabled Boolean @default(false) @map("rotation_enabled")
   lastRotatedAt   DateTime? @map("last_rotated_at")
   nextRotationAt  DateTime? @map("next_rotation_at")
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
-  
+
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+
   @@unique([tenantId, name])
   @@index([tenantId])
   @@map("secrets")
@@ -435,29 +438,29 @@ model AuditEvent {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String?  @map("tenant_id") @db.Uuid
   userId      String?  @map("user_id") @db.Uuid
-  
+
   eventType   String   @map("event_type") @db.VarChar(50)
   action      String   @db.VarChar(100)
   resource    String   @db.VarChar(100)
   resourceId  String?  @map("resource_id") @db.Uuid
-  
+
   ipAddress   String?  @map("ip_address") @db.VarChar(45)
   userAgent   String?  @map("user_agent") @db.Text
   sessionId   String?  @map("session_id") @db.Uuid
   requestId   String?  @map("request_id") @db.VarChar(100)
-  
+
   details     Json     @default("{}")
   status      String   @default("success") @db.VarChar(50)
   errorMessage String? @map("error_message") @db.Text
-  
+
   duration    Int?
-  
+
   timestamp   DateTime @default(now())
-  
+
   // Relations
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  
+
   @@index([tenantId, timestamp])
   @@index([userId, timestamp])
   @@index([eventType, timestamp])
@@ -470,17 +473,17 @@ model ActivityLog {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   userId      String   @map("user_id") @db.Uuid
-  
+
   action      String   @db.VarChar(100)
   resource    String   @db.VarChar(100)
   resourceId  String?  @map("resource_id") @db.Uuid
   details     Json     @default("{}")
-  
+
   timestamp   DateTime @default(now())
-  
+
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([tenantId, timestamp])
   @@index([userId, timestamp])
   @@map("activity_logs")
@@ -495,23 +498,23 @@ model UsageRecord {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
   userId      String?  @map("user_id") @db.Uuid
-  
+
   service     String   @db.VarChar(50)
   operation   String   @db.VarChar(100)
   quantity    Float
   unit        String   @db.VarChar(50)
-  
+
   model       String?  @db.VarChar(100)
   provider    String?  @db.VarChar(50)
-  
+
   metadata    Json     @default("{}")
-  
+
   timestamp   DateTime @default(now())
-  
+
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   costRecords CostRecord[]
-  
+
   @@index([tenantId, timestamp])
   @@index([service, timestamp])
   @@map("usage_records")
@@ -522,24 +525,24 @@ model CostRecord {
   id            String   @id @default(uuid()) @db.Uuid
   tenantId      String   @map("tenant_id") @db.Uuid
   usageRecordId String?  @map("usage_record_id") @db.Uuid
-  
+
   service       String   @db.VarChar(50)
   description   String   @db.Text
-  
+
   quantity      Float
   unitCost      Float    @map("unit_cost")
   totalCost     Float    @map("total_cost")
   currency      String   @default("USD") @db.VarChar(3)
-  
+
   periodStart   DateTime @map("period_start")
   periodEnd     DateTime @map("period_end")
-  
+
   timestamp     DateTime @default(now())
-  
+
   // Relations
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   usageRecord UsageRecord? @relation(fields: [usageRecordId], references: [id], onDelete: SetNull)
-  
+
   @@index([tenantId, timestamp])
   @@index([periodStart, periodEnd])
   @@map("cost_records")
@@ -562,10 +565,10 @@ model Budget {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
-  
+
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+
   @@index([tenantId])
   @@index([status])
   @@map("budgets")
@@ -587,55 +590,48 @@ model MarketplaceTemplate {
   tags            String[] @default([])
   icon            String?  @db.VarChar(500)
   screenshots     String[] @default([])
-  
-  // Content
+
   currentVersionId String? @map("current_version_id") @db.Uuid
-  
-  // Publishing
+
   status          String   @default("draft") @db.VarChar(50)
   visibility      String   @default("public") @db.VarChar(50)
-  
-  // Pricing
+
   priceType       String   @default("free") @db.VarChar(20)
   priceAmount     Float?   @map("price_amount")
   currency        String   @default("USD") @db.VarChar(3)
-  
-  // Stats
+
   installCount    Int      @default(0) @map("install_count")
   viewCount       Int      @default(0) @map("view_count")
   downloadCount   Int      @default(0) @map("download_count")
   rating          Float    @default(0)
   reviewCount     Int      @default(0) @map("review_count")
   trendingScore   Float    @default(0) @map("trending_score")
-  
-  // Moderation
+
   reviewedAt      DateTime? @map("reviewed_at")
   reviewedBy      String?  @map("reviewed_by") @db.Uuid
   reviewNotes     String?  @map("review_notes") @db.Text
-  
-  // Metadata
+
   license         String   @default("MIT") @db.VarChar(50)
   documentation   String?  @db.Text
   repositoryUrl   String?  @map("repository_url") @db.Text
   demoUrl         String?  @map("demo_url") @db.Text
   supportUrl      String?  @map("support_url") @db.Text
   minPlatformVersion String? @map("min_platform_version") @db.VarChar(50)
-  
+
   metadata        Json     @default("{}")
-  
-  // Timestamps
+
   publishedAt     DateTime? @map("published_at")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
-  
+
   // Relations
   author       MarketplaceAuthor    @relation(fields: [authorId], references: [id])
   versions     MarketplaceVersion[]
   reviews      MarketplaceReview[]
   purchases    MarketplacePurchase[]
   installs     MarketplaceInstall[]
-  
+
   @@index([status, visibility])
   @@index([category])
   @@index([authorId])
@@ -657,10 +653,10 @@ model MarketplaceVersion {
   isBreaking    Boolean  @default(false) @map("is_breaking")
   minPlatformVersion String? @map("min_platform_version") @db.VarChar(50)
   createdAt     DateTime @default(now()) @map("created_at")
-  
+
   // Relations
   template MarketplaceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  
+
   @@unique([templateId, version])
   @@index([templateId])
   @@index([isCurrent])
@@ -677,36 +673,32 @@ model MarketplaceAuthor {
   websiteUrl        String?  @map("website_url") @db.Text
   twitterHandle     String?  @map("twitter_handle") @db.VarChar(50)
   githubHandle      String?  @map("github_handle") @db.VarChar(50)
-  
-  // Verification
+
   verified          Boolean  @default(false)
   verifiedAt        DateTime? @map("verified_at")
   verificationNotes String?  @map("verification_notes") @db.Text
-  
-  // Earnings
+
   totalEarnings     Float    @default(0) @map("total_earnings")
   availableBalance  Float    @default(0) @map("available_balance")
   pendingBalance    Float    @default(0) @map("pending_balance")
   totalPaidOut      Float    @default(0) @map("total_paid_out")
   currency          String   @default("USD") @db.VarChar(3)
-  
-  // Payment
+
   stripeAccountId   String?  @map("stripe_account_id") @db.VarChar(100)
   payoutEnabled     Boolean  @default(false) @map("payout_enabled")
-  
-  // Stats
+
   templateCount     Int      @default(0) @map("template_count")
   installCount      Int      @default(0) @map("install_count")
   averageRating     Float    @default(0) @map("average_rating")
-  
+
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   templates  MarketplaceTemplate[]
   payouts    MarketplacePayout[]
-  
+
   @@index([verified])
   @@map("marketplace_authors")
 }
@@ -717,25 +709,25 @@ model MarketplacePurchase {
   templateId      String   @map("template_id") @db.Uuid
   buyerId         String   @map("buyer_id") @db.Uuid
   buyerTenantId   String   @map("buyer_tenant_id") @db.Uuid
-  
+
   amount          Float
   currency        String   @default("USD") @db.VarChar(3)
   platformFee     Float    @map("platform_fee")
   authorEarnings  Float    @map("author_earnings")
-  
+
   status          String   @default("pending") @db.VarChar(50)
   paymentProvider String?  @map("payment_provider") @db.VarChar(50)
   paymentIntentId String?  @map("payment_intent_id") @db.VarChar(200)
-  
+
   refundedAt      DateTime? @map("refunded_at")
   refundReason    String?  @map("refund_reason") @db.Text
-  
+
   createdAt       DateTime @default(now()) @map("created_at")
   completedAt     DateTime? @map("completed_at")
-  
+
   // Relations
   template MarketplaceTemplate @relation(fields: [templateId], references: [id])
-  
+
   @@index([templateId])
   @@index([buyerId])
   @@index([status])
@@ -750,17 +742,17 @@ model MarketplaceInstall {
   tenantId      String   @map("tenant_id") @db.Uuid
   userId        String   @map("user_id") @db.Uuid
   applicationId String?  @map("application_id") @db.Uuid
-  
+
   status        String   @default("pending") @db.VarChar(50)
   error         String?  @db.Text
-  
+
   createdAt     DateTime @default(now()) @map("created_at")
   installedAt   DateTime? @map("installed_at")
-  
+
   // Relations
   template MarketplaceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+
   @@unique([templateId, tenantId])
   @@index([tenantId])
   @@index([userId])
@@ -776,19 +768,18 @@ model MarketplaceReview {
   rating      Int
   title       String?  @db.VarChar(200)
   comment     String?  @db.Text
-  
-  // Moderation
+
   status      String   @default("published") @db.VarChar(50)
   helpful     Int      @default(0)
   reported    Int      @default(0)
-  
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  
+
   // Relations
   template MarketplaceTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
   tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
+
   @@unique([templateId, userId])
   @@index([templateId])
   @@index([status])
@@ -801,24 +792,131 @@ model MarketplacePayout {
   authorId        String   @map("author_id") @db.Uuid
   amount          Float
   currency        String   @default("USD") @db.VarChar(3)
-  
+
   status          String   @default("pending") @db.VarChar(50)
   provider        String   @default("stripe") @db.VarChar(50)
   providerRef     String?  @map("provider_ref") @db.VarChar(200)
-  
+
   periodStart     DateTime @map("period_start")
   periodEnd       DateTime @map("period_end")
-  
+
   notes           String?  @db.Text
   error           String?  @db.Text
-  
+
   createdAt       DateTime @default(now()) @map("created_at")
   completedAt     DateTime? @map("completed_at")
-  
+
   // Relations
   author MarketplaceAuthor @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  
+
   @@index([authorId])
   @@index([status])
   @@map("marketplace_payouts")
+}
+
+// ============================================================
+// AI AGENTS - Autonomous Business Logic
+// ============================================================
+
+/// Agent - Autonomous AI agent definition
+model Agent {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  name               String   @db.VarChar(255)
+  description        String   @db.Text
+  icon               String?  @db.VarChar(50)
+  category           String   @default("custom") @db.VarChar(50)
+
+  systemPrompt       String   @map("system_prompt") @db.Text
+  model              String   @default("gpt-4-turbo-preview") @db.VarChar(100)
+  temperature        Float    @default(0.3)
+  maxSteps           Int      @default(20) @map("max_steps")
+  maxTokensPerRun    Int      @default(100000) @map("max_tokens_per_run")
+  maxDurationSeconds Int      @default(300) @map("max_duration_seconds")
+
+  allowedTools       String[] @default([]) @map("allowed_tools")
+  capabilities       Json     @default("[]")
+
+  requiresApproval   Boolean  @default(true) @map("requires_approval")
+  approvalThreshold  String   @default("high") @map("approval_threshold") @db.VarChar(20)
+
+  triggers           Json     @default("[]")
+
+  status             String   @default("active") @db.VarChar(50)
+
+  createdBy          String?  @map("created_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  // Relations
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  runs   AgentRun[]
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("agents")
+}
+
+/// AgentRun - Single agent execution instance
+model AgentRun {
+  id                 String   @id @default(uuid()) @db.Uuid
+  agentId            String   @map("agent_id") @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  userId             String?  @map("user_id") @db.Uuid
+
+  status             String   @default("pending") @db.VarChar(50)
+  input              Json     @default("{}")
+  output             Json?
+  error              String?  @db.Text
+
+  currentStepIndex   Int      @default(0) @map("current_step_index")
+  totalTokens        Int      @default(0) @map("total_tokens")
+  totalCostUsd       Float    @default(0) @map("total_cost_usd")
+  toolCalls          Int      @default(0) @map("tool_calls")
+
+  startedAt          DateTime @default(now()) @map("started_at")
+  completedAt        DateTime? @map("completed_at")
+  durationMs         Int?     @map("duration_ms")
+
+  approvalRequestId  String?  @map("approval_request_id") @db.Uuid
+  metadata           Json     @default("{}")
+
+  // Relations
+  agent Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps AgentStep[]
+
+  @@index([agentId])
+  @@index([tenantId])
+  @@index([status])
+  @@map("agent_runs")
+}
+
+/// AgentStep - Single step in agent execution
+model AgentStep {
+  id          String   @id @default(uuid()) @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  stepIndex   Int      @map("step_index")
+  type        String   @db.VarChar(50)
+
+  thought     String?  @db.Text
+  action      Json?
+  observation Json?
+  decision    Json?
+  output      String?  @db.Text
+  approval    Json?
+
+  tokensUsed  Int      @default(0) @map("tokens_used")
+  costUsd     Float    @default(0) @map("cost_usd")
+  durationMs  Int      @default(0) @map("duration_ms")
+  error       String?  @db.Text
+
+  timestamp   DateTime @default(now())
+
+  // Relations
+  run AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("agent_steps")
 }
