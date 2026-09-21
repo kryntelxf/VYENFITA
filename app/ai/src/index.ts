@@ -1,7 +1,7 @@
 /**
  * VYENFITA AI Service - Entry Point
  * 
- * @version 3.1.0
+ * @version 4.0.0
  */
 
 import express from 'express';
@@ -23,12 +23,13 @@ import { createEnterpriseRouter } from './routes/enterprise.routes';
 import { createDeploymentRouter } from './routes/deployment.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import { createAgentRouter } from './routes/agent.routes';
+import { createFinOpsRouter } from './routes/finops.routes';
 import { createBIRouter } from './routes/bi.routes';
-import { createTriggerRouter } from './routes/trigger.routes';
-import { createWebhookReceiverRouter } from './routes/webhook.routes';
 import { createSSORouter } from './routes/sso.routes';
 import { createSCIMRouter } from './routes/scim.routes';
-import { createFinOpsRouter } from './routes/finops.routes';
+import { createTriggerRouter } from './routes/trigger.routes';
+import { createWebhookReceiverRouter } from './routes/webhook.routes';
+import { createMarketplaceRouter } from './routes/marketplace.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -43,7 +44,6 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
 import { logger } from './lib/observability/logger';
-import { HealthService } from './lib/observability/health.service';
 import { getSchedulerService } from './lib/workflow/scheduler.service';
 
 // ============================================================
@@ -60,21 +60,16 @@ try {
   const configured = ProviderConfigManager.getConfiguredProviders();
   logger.info(`Configured AI providers: ${configured.join(', ') || 'none'}`);
 } catch (error) {
-  logger.warn(
-    'No AI providers configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY'
-  );
+  logger.warn('No AI providers configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY');
 }
 
 // ============================================================
 // INITIALIZE AUTH
 // ============================================================
 
-const apiKeys =
-  process.env.AI_API_KEYS?.split(',').filter((k) => k.trim()) || [];
+const apiKeys = process.env.AI_API_KEYS?.split(',').filter((k) => k.trim()) || [];
 AuthMiddleware.initialize(apiKeys);
-logger.info(
-  `Auth keys: ${apiKeys.length > 0 ? 'enabled' : 'disabled (dev mode)'}`
-);
+logger.info(`Auth keys: ${apiKeys.length > 0 ? 'enabled' : 'disabled (dev mode)'}`);
 
 // ============================================================
 // INITIALIZE WORKFLOW ENGINE (legacy — kept for backward compat)
@@ -116,9 +111,7 @@ app.use(
 // CORS
 app.use(
   cors({
-    origin: process.env.APPSMITH_API_URL
-      ? [process.env.APPSMITH_API_URL]
-      : '*',
+    origin: process.env.APPSMITH_API_URL ? [process.env.APPSMITH_API_URL] : '*',
     credentials: true,
   })
 );
@@ -135,8 +128,7 @@ if (process.env.AI_RATE_LIMIT_ENABLED !== 'false') {
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
-    skipSuccessfulRequests:
-      process.env.AI_RATE_LIMIT_SKIP_SUCCESSFUL === 'true',
+    skipSuccessfulRequests: process.env.AI_RATE_LIMIT_SKIP_SUCCESSFUL === 'true',
   });
   app.use(limiter);
 }
@@ -151,30 +143,26 @@ app.use('/', createObservabilityRouter());
 // Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
 
-// SSO endpoints (mix of public/protected — handled internally)
+// SSO endpoints (mix public + protected inside router)
 app.use('/api/v1/auth/sso', createSSORouter());
 
 // Webhook receiver (public, HMAC-verified)
 app.use('/api/v1/webhooks', createWebhookReceiverRouter());
 
+// Marketplace (mix public + protected — auth required for writes)
+app.use('/api/v1/marketplace', createMarketplaceRouter());
+
 // ============================================================
 // PROTECTED ROUTES (auth + tenant isolation)
 // ============================================================
 
-const protectedMiddleware = [
-  AuthMiddleware.validate,
-  TenantMiddleware.enforce,
-];
+const protectedMiddleware = [AuthMiddleware.validate, TenantMiddleware.enforce];
 
 // AI generation and chat
 app.use('/api/v1/ai', ...protectedMiddleware, createAIRouter());
 
 // Applications CRUD
-app.use(
-  '/api/v1/applications',
-  ...protectedMiddleware,
-  createApplicationRouter()
-);
+app.use('/api/v1/applications', ...protectedMiddleware, createApplicationRouter());
 
 // Workflows CRUD + execution
 app.use('/api/v1/workflows', ...protectedMiddleware, createWorkflowRouter());
@@ -185,30 +173,26 @@ app.use('/api/v1/tenant', ...protectedMiddleware, createTenantRouter());
 // Advanced features (NL to SQL, Scheduled reports, Code generation)
 app.use('/api/v1/advanced', ...protectedMiddleware, createAdvancedRouter());
 
-// Enterprise features (SSO, Audit, RBAC)
+// Enterprise features (SSO management, Audit, RBAC)
 app.use('/api/v1/enterprise', ...protectedMiddleware, createEnterpriseRouter());
 
 // Deployments
-app.use(
-  '/api/v1/deployments',
-  ...protectedMiddleware,
-  createDeploymentRouter()
-);
+app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter());
 
 // AI Agents (Requirement, Architecture, Testing, Code Review)
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
 
-// Business Intelligence (NL to SQL, KPI, Anomaly)
+// FinOps (cost, budgets, optimization)
+app.use('/api/v1/finops', ...protectedMiddleware, createFinOpsRouter());
+
+// Business Intelligence (NL to SQL, anomaly detection)
 app.use('/api/v1/bi', ...protectedMiddleware, createBIRouter());
 
-// Triggers + Approvals
-app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
-
-// SCIM 2.0 (user provisioning)
+// SCIM (user provisioning — RFC 7643/7644)
 app.use('/api/v1/scim/v2', ...protectedMiddleware, createSCIMRouter());
 
-// FinOps (cost management)
-app.use('/api/v1/finops', ...protectedMiddleware, createFinOpsRouter());
+// Triggers & Approvals
+app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -262,7 +246,7 @@ const server = app.listen(port, host, () => {
     host,
     port,
     environment: process.env.NODE_ENV || 'development',
-    version: process.env.SERVICE_VERSION || '3.1.0',
+    version: process.env.SERVICE_VERSION || '4.0.0',
   });
 
   logger.info('📍 Endpoints:', {
@@ -274,7 +258,6 @@ const server = app.listen(port, host, () => {
   logger.info('📋 API Routes:', {
     auth: '/api/v1/auth',
     sso: '/api/v1/auth/sso',
-    scim: '/api/v1/scim/v2',
     ai: '/api/v1/ai',
     applications: '/api/v1/applications',
     workflows: '/api/v1/workflows',
@@ -283,16 +266,18 @@ const server = app.listen(port, host, () => {
     enterprise: '/api/v1/enterprise',
     deployments: '/api/v1/deployments',
     agents: '/api/v1/agents',
-    bi: '/api/v1/bi',
-    triggers: '/api/v1/workflows/:id/triggers',
-    approvals: '/api/v1/approvals',
-    webhooks: '/api/v1/webhooks/inbound/*',
     finops: '/api/v1/finops',
+    bi: '/api/v1/bi',
+    scim: '/api/v1/scim/v2',
+    triggers: '/api/v1',
+    webhooks: '/api/v1/webhooks',
+    marketplace: '/api/v1/marketplace',
   });
 
   // Start scheduler
   const scheduler = getSchedulerService();
   scheduler.start();
+  logger.info('⏰ Scheduler started');
 });
 
 // ============================================================
@@ -358,6 +343,7 @@ process.on('uncaughtException', (error) => {
     error: error.message,
     stack: error.stack,
   });
+  // Don't exit — try to keep the service alive
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -365,6 +351,7 @@ process.on('unhandledRejection', (reason) => {
     reason: reason instanceof Error ? reason.message : String(reason),
     stack: reason instanceof Error ? reason.stack : undefined,
   });
+  // Don't exit — try to keep the service alive
 });
 
 // ============================================================
