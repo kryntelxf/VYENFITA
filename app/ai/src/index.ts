@@ -24,12 +24,8 @@ import { createDeploymentRouter } from './routes/deployment.routes';
 import { createObservabilityRouter } from './routes/observability.routes';
 import { createAgentRouter } from './routes/agent.routes';
 import { createFinOpsRouter } from './routes/finops.routes';
-import { createBIRouter } from './routes/bi.routes';
-import { createSSORouter } from './routes/sso.routes';
-import { createSCIMRouter } from './routes/scim.routes';
-import { createTriggerRouter } from './routes/trigger.routes';
-import { createWebhookReceiverRouter } from './routes/webhook.routes';
 import { createMarketplaceRouter } from './routes/marketplace.routes';
+import { createAnalyticsRouter } from './routes/analytics.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -43,8 +39,8 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 // ============================================================
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
-import { logger } from './lib/observability/logger';
 import { getSchedulerService } from './lib/workflow/scheduler.service';
+import { logger } from './lib/observability/logger';
 
 // ============================================================
 // ENV
@@ -72,7 +68,7 @@ AuthMiddleware.initialize(apiKeys);
 logger.info(`Auth keys: ${apiKeys.length > 0 ? 'enabled' : 'disabled (dev mode)'}`);
 
 // ============================================================
-// INITIALIZE WORKFLOW ENGINE (legacy — kept for backward compat)
+// INITIALIZE WORKFLOW ENGINE
 // ============================================================
 
 const workflowEngine = new WorkflowEngine(logger);
@@ -90,10 +86,8 @@ const host = process.env.AI_SERVICE_HOST || '0.0.0.0';
 // GLOBAL MIDDLEWARE
 // ============================================================
 
-// Observability FIRST — every request gets a trace ID
 app.use(ObservabilityMiddleware.instrument);
 
-// Security headers
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -108,7 +102,6 @@ app.use(
   })
 );
 
-// CORS
 app.use(
   cors({
     origin: process.env.APPSMITH_API_URL ? [process.env.APPSMITH_API_URL] : '*',
@@ -116,11 +109,9 @@ app.use(
   })
 );
 
-// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate limiting
 if (process.env.AI_RATE_LIMIT_ENABLED !== 'false') {
   const limiter = rateLimit({
     windowMs: parseInt(process.env.AI_RATE_LIMIT_WINDOW_MS || '60000', 10),
@@ -143,13 +134,7 @@ app.use('/', createObservabilityRouter());
 // Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
 
-// SSO endpoints (mix public + protected inside router)
-app.use('/api/v1/auth/sso', createSSORouter());
-
-// Webhook receiver (public, HMAC-verified)
-app.use('/api/v1/webhooks', createWebhookReceiverRouter());
-
-// Marketplace (mix public + protected — auth required for writes)
+// Marketplace public read endpoints (/api/v1/marketplace/templates, etc.)
 app.use('/api/v1/marketplace', createMarketplaceRouter());
 
 // ============================================================
@@ -173,26 +158,20 @@ app.use('/api/v1/tenant', ...protectedMiddleware, createTenantRouter());
 // Advanced features (NL to SQL, Scheduled reports, Code generation)
 app.use('/api/v1/advanced', ...protectedMiddleware, createAdvancedRouter());
 
-// Enterprise features (SSO management, Audit, RBAC)
+// Enterprise features (SSO, Audit, RBAC)
 app.use('/api/v1/enterprise', ...protectedMiddleware, createEnterpriseRouter());
 
 // Deployments
 app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter());
 
-// AI Agents (Requirement, Architecture, Testing, Code Review)
+// AI Agents
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
 
-// FinOps (cost, budgets, optimization)
+// FinOps (cost management)
 app.use('/api/v1/finops', ...protectedMiddleware, createFinOpsRouter());
 
-// Business Intelligence (NL to SQL, anomaly detection)
-app.use('/api/v1/bi', ...protectedMiddleware, createBIRouter());
-
-// SCIM (user provisioning — RFC 7643/7644)
-app.use('/api/v1/scim/v2', ...protectedMiddleware, createSCIMRouter());
-
-// Triggers & Approvals
-app.use('/api/v1', ...protectedMiddleware, createTriggerRouter());
+// Analytics (metrics, KPI, funnels, cohort, predictive, NL query)
+app.use('/api/v1/analytics', ...protectedMiddleware, createAnalyticsRouter());
 
 // ============================================================
 // 404 HANDLER
@@ -257,7 +236,6 @@ const server = app.listen(port, host, () => {
 
   logger.info('📋 API Routes:', {
     auth: '/api/v1/auth',
-    sso: '/api/v1/auth/sso',
     ai: '/api/v1/ai',
     applications: '/api/v1/applications',
     workflows: '/api/v1/workflows',
@@ -267,17 +245,14 @@ const server = app.listen(port, host, () => {
     deployments: '/api/v1/deployments',
     agents: '/api/v1/agents',
     finops: '/api/v1/finops',
-    bi: '/api/v1/bi',
-    scim: '/api/v1/scim/v2',
-    triggers: '/api/v1',
-    webhooks: '/api/v1/webhooks',
     marketplace: '/api/v1/marketplace',
+    analytics: '/api/v1/analytics',
   });
 
-  // Start scheduler
+  // Start workflow scheduler
   const scheduler = getSchedulerService();
   scheduler.start();
-  logger.info('⏰ Scheduler started');
+  logger.info('⏰ Workflow Scheduler started');
 });
 
 // ============================================================
@@ -343,7 +318,6 @@ process.on('uncaughtException', (error) => {
     error: error.message,
     stack: error.stack,
   });
-  // Don't exit — try to keep the service alive
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -351,7 +325,6 @@ process.on('unhandledRejection', (reason) => {
     reason: reason instanceof Error ? reason.message : String(reason),
     stack: reason instanceof Error ? reason.stack : undefined,
   });
-  // Don't exit — try to keep the service alive
 });
 
 // ============================================================
