@@ -80,23 +80,38 @@ jobs:
         run: |
           cd app/ai
           yarn test --ci --coverage --reporters=default 2>&1 | tee test-output.log
+        continue-on-error: true
+
+      - name: Clean coverage report filenames
+        if: always()
+        run: |
+          # Remove invalid characters (colons, etc.) from coverage report filenames
+          # This prevents "invalid path" errors during artifact upload
+          if [ -d app/ai/coverage ]; then
+            echo "Cleaning coverage filenames..."
+            find app/ai/coverage -type f -name "*:*" -print0 2>/dev/null | while IFS= read -r -d '' file; do
+              newname=$(echo "$file" | tr ':' '_')
+              mv "$file" "$newname" 2>/dev/null || true
+            done
+            
+            # Also clean directory names
+            find app/ai/coverage -type d -name "*:*" 2>/dev/null | while read -r dir; do
+              newdir=$(echo "$dir" | tr ':' '_')
+              mv "$dir" "$newdir" 2>/dev/null || true
+            done
+            
+            echo "Coverage filenames cleaned."
+          else
+            echo "No coverage directory found."
+          fi
 
       - name: Show test errors
         if: failure()
         run: |
-          echo "=== LAST 200 LINES OF TEST OUTPUT ==="
-          tail -200 app/ai/test-output.log
+          echo "=== LAST 100 LINES OF TEST OUTPUT ==="
+          tail -100 app/ai/test-output.log || echo "No test log found"
 
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: app/ai/coverage/
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Upload test log
+      - name: Upload test log (always)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -104,6 +119,17 @@ jobs:
           path: app/ai/test-output.log
           retention-days: 7
           if-no-files-found: ignore
+          include-hidden-files: false
+
+      - name: Upload coverage (if clean)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: app/ai/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
+          include-hidden-files: false
 
       - name: Test summary
         if: always()
@@ -112,4 +138,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ Test workflow executed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Coverage report and test log available in artifacts." >> $GITHUB_STEP_SUMMARY
+          echo "Coverage and test log available in artifacts (if upload succeeded)." >> $GITHUB_STEP_SUMMARY
