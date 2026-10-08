@@ -1,0 +1,229 @@
+name: Kubernetes Driver Integration Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/ai/src/lib/deployment/drivers/kubernetes.driver.ts'
+      - 'app/ai/src/__tests__/integration/deployment/kubernetes.driver.integration.test.ts'
+      - '.github/workflows/k8s-driver-test.yml'
+  pull_request:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/ai/src/lib/deployment/drivers/kubernetes.driver.ts'
+      - 'app/ai/src/__tests__/integration/deployment/kubernetes.driver.integration.test.ts'
+
+jobs:
+  k8s-integration:
+    name: Kubernetes Driver Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vyenfita_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      JWT_SECRET: test-secret-key-at-least-32-characters-long
+      ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+      NODE_ENV: test
+      LOG_LEVEL: error
+      SCHEDULER_ENABLED: 'false'
+      K8S_NAMESPACE: vyenfita-test
+      K8S_INTEGRATION_TEST: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # STEP 1: Setup kind cluster
+      # ============================================================
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: vyenfita-test
+          wait: 120s
+          node_image: kindest/node:v1.29.0
+
+      - name: Verify kind cluster
+        run: |
+          echo "=== Kind cluster info ==="
+          kubectl cluster-info
+          echo ""
+          echo "=== Nodes ==="
+          kubectl get nodes
+          echo ""
+          echo "=== Create namespace ==="
+          kubectl create namespace vyenfita-test || true
+          kubectl get namespaces
+
+      # ============================================================
+      # STEP 2: Export kubeconfig as base64
+      # ============================================================
+      - name: Export kubeconfig as base64
+        id: kubeconfig
+        run: |
+          # kind writes kubeconfig to a temp file. Export as base64
+          # so the Node process can read it from env.
+          KUBECONFIG_B64=$(kubectl config view --raw --flatten | base64 -w0)
+          echo "KUBECONFIG_BASE64=${KUBECONFIG_B64}" >> $GITHUB_ENV
+
+      # ============================================================
+      # STEP 3: Setup Node + dependencies
+      # ============================================================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Generate Prisma Client
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Apply migrations
+        run: |
+          cd app/ai
+          npx prisma migrate deploy || npx prisma db push --accept-data-loss
+
+      # ============================================================
+      # STEP 4: Run K8s integration test
+      # ============================================================
+      - name: Run Kubernetes driver integration test
+        run: |
+          cd app/ai
+          yarn jest src/__tests__/integration/deployment/kubernetes.driver.integration.test.ts \
+            --verbose \
+            --ci \
+            --testTimeout=180000 \
+            2>&1 | tee k8s-test-output.log
+
+      # ============================================================
+      # STEP 5: Debug output on failure
+      # ============================================================
+      - name: Show test output on failure
+        if: failure()
+        run: |
+          echo "=== TEST OUTPUT ==="
+          cat app/ai/k8s-test-output.log || echo "No log"
+
+      - name: Dump cluster state on failure
+        if: failure()
+        run: |
+          echo "=== Namespace state ==="
+          kubectl get all -n vyenfita-test || true
+          echo ""
+          echo "=== Events ==="
+          kubectl get events -n vyenfita-test --sort-by='.lastTimestamp' || true
+          echo ""
+          echo "=== Deployment describe ==="
+          kubectl describe deployments -n vyenfita-test || true
+          echo ""
+          echo "=== Pod logs (if any) ==="
+          for pod in $(kubectl get pods -n vyenfita-test -o name 2>/dev/null); do
+            echo "--- $pod ---"
+            kubectl logs -n vyenfita-test "$pod" --tail=50 2>/dev/null || true
+          done
+
+      # ============================================================
+      # STEP 6: Upload test log
+      # ============================================================
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-integration-test-output
+          path: app/ai/k8s-test-output.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ============================================================
+      # STEP 7: Cleanup
+      # ============================================================
+      - name: Cleanup namespace
+        if: always()
+        run: |
+          kubectl delete namespace vyenfita-test --ignore-not-found=true || true
+
+  # ============================================================
+  # SEPARATE JOB: verify K8s driver unit tests still pass
+  # ============================================================
+  unit-tests:
+    name: Kubernetes Driver Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vyenfita_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      JWT_SECRET: test-secret-key-at-least-32-characters-long
+      ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+      NODE_ENV: test
+      LOG_LEVEL: error
+      SCHEDULER_ENABLED: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Prisma generate
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Prisma migrate
+        run: |
+          cd app/ai
+          npx prisma migrate deploy || npx prisma db push --accept-data-loss
+
+      - name: Run K8s unit tests
+        run: |
+          cd app/ai
+          yarn jest src/__tests__/unit/deployment/kubernetes.driver.test.ts \
+            --verbose \
+            --ci
