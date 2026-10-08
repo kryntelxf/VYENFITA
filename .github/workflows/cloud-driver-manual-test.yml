@@ -1,0 +1,263 @@
+name: Cloud Driver Manual Test
+
+# ============================================================
+# This workflow tests cloud deployment drivers (AWS ECS, GCP
+# Cloud Run, Vercel) against REAL cloud environments.
+#
+# IMPORTANT:
+# - This is MANUAL ONLY (workflow_dispatch). Never run on push/PR.
+# - Requires GitHub Environment: "cloud-verification"
+#   → Add required reviewers to prevent accidental runs.
+# - Credentials are read from GitHub Secrets. Missing credentials
+#   cause the corresponding driver test to be SKIPPED (not failed).
+#
+# To run:
+#   1. Ensure all secrets are set (see docs/CLOUD_DRIVER_VERIFICATION.md)
+#   2. Go to Actions → "Cloud Driver Manual Test" → Run workflow
+#   3. Select driver (or "all") and click Run
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      driver:
+        description: 'Driver to test'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - aws-ecs
+          - gcp-cloud-run
+          - vercel
+      dry_run:
+        description: 'Dry run (validate config only, no actual deploy)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  detect-credentials:
+    name: Detect Available Credentials
+    runs-on: ubuntu-latest
+    outputs:
+      has_aws: ${{ steps.check.outputs.has_aws }}
+      has_gcp: ${{ steps.check.outputs.has_gcp }}
+      has_vercel: ${{ steps.check.outputs.has_vercel }}
+
+    steps:
+      - name: Check which credentials are available
+        id: check
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          GCP_ACCESS_TOKEN: ${{ secrets.GCP_ACCESS_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          echo "has_aws=${{ secrets.AWS_ACCESS_KEY_ID != '' }}" >> $GITHUB_OUTPUT
+          echo "has_gcp=${{ secrets.GCP_ACCESS_TOKEN != '' }}" >> $GITHUB_OUTPUT
+          echo "has_vercel=${{ secrets.VERCEL_TOKEN != '' }}" >> $GITHUB_OUTPUT
+
+          echo "### Credential Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Driver | Credentials | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| AWS ECS | ${{ secrets.AWS_ACCESS_KEY_ID != '' && 'Present' || 'Missing' }} | ${{ secrets.AWS_ACCESS_KEY_ID != '' && 'Will run' || 'Will skip' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| GCP Cloud Run | ${{ secrets.GCP_ACCESS_TOKEN != '' && 'Present' || 'Missing' }} | ${{ secrets.GCP_ACCESS_TOKEN != '' && 'Will run' || 'Will skip' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Vercel | ${{ secrets.VERCEL_TOKEN != '' && 'Present' || 'Missing' }} | ${{ secrets.VERCEL_TOKEN != '' && 'Will run' || 'Will skip' }} |" >> $GITHUB_STEP_SUMMARY
+
+  test-aws-ecs:
+    name: Test AWS ECS Driver
+    needs: detect-credentials
+    if: |
+      needs.detect-credentials.outputs.has_aws == 'true' &&
+      (github.event.inputs.driver == 'all' || github.event.inputs.driver == 'aws-ecs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: cloud-verification
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Generate Prisma Client
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Run AWS ECS integration test
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ECS_CLUSTER: ${{ secrets.AWS_ECS_CLUSTER }}
+          AWS_SUBNETS: ${{ secrets.AWS_SUBNETS }}
+          AWS_SECURITY_GROUPS: ${{ secrets.AWS_SECURITY_GROUPS }}
+          AWS_EXECUTION_ROLE_ARN: ${{ secrets.AWS_EXECUTION_ROLE_ARN }}
+          AWS_TASK_ROLE_ARN: ${{ secrets.AWS_TASK_ROLE_ARN }}
+          AWS_LOG_GROUP: ${{ secrets.AWS_LOG_GROUP }}
+          JWT_SECRET: test-secret-key-at-least-32-characters-long
+          ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+          NODE_ENV: test
+          LOG_LEVEL: info
+          CLOUD_INTEGRATION_TEST: 'true'
+          CLOUD_DRIVER: 'aws-ecs'
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          cd app/ai
+          yarn jest src/__tests__/integration/deployment/cloud.driver.integration.test.ts \
+            --verbose \
+            --ci \
+            --testTimeout=600000 \
+            2>&1 | tee aws-test-output.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-ecs-test-output
+          path: app/ai/aws-test-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  test-gcp-cloud-run:
+    name: Test GCP Cloud Run Driver
+    needs: detect-credentials
+    if: |
+      needs.detect-credentials.outputs.has_gcp == 'true' &&
+      (github.event.inputs.driver == 'all' || github.event.inputs.driver == 'gcp-cloud-run')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: cloud-verification
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Generate Prisma Client
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Run GCP Cloud Run integration test
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ secrets.GCP_REGION }}
+          GCP_ACCESS_TOKEN: ${{ secrets.GCP_ACCESS_TOKEN }}
+          GCP_SERVICE_ACCOUNT_BASE64: ${{ secrets.GCP_SERVICE_ACCOUNT_BASE64 }}
+          JWT_SECRET: test-secret-key-at-least-32-characters-long
+          ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+          NODE_ENV: test
+          LOG_LEVEL: info
+          CLOUD_INTEGRATION_TEST: 'true'
+          CLOUD_DRIVER: 'gcp-cloud-run'
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          cd app/ai
+          yarn jest src/__tests__/integration/deployment/cloud.driver.integration.test.ts \
+            --verbose \
+            --ci \
+            --testTimeout=600000 \
+            2>&1 | tee gcp-test-output.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcp-cloud-run-test-output
+          path: app/ai/gcp-test-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  test-vercel:
+    name: Test Vercel Driver
+    needs: detect-credentials
+    if: |
+      needs.detect-credentials.outputs.has_vercel == 'true' &&
+      (github.event.inputs.driver == 'all' || github.event.inputs.driver == 'vercel')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloud-verification
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Generate Prisma Client
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Run Vercel integration test
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_NAME: ${{ secrets.VERCEL_PROJECT_NAME }}
+          JWT_SECRET: test-secret-key-at-least-32-characters-long
+          ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+          NODE_ENV: test
+          LOG_LEVEL: info
+          CLOUD_INTEGRATION_TEST: 'true'
+          CLOUD_DRIVER: 'vercel'
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          cd app/ai
+          yarn jest src/__tests__/integration/deployment/cloud.driver.integration.test.ts \
+            --verbose \
+            --ci \
+            --testTimeout=600000 \
+            2>&1 | tee vercel-test-output.log
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vercel-test-output
+          path: app/ai/vercel-test-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  summary:
+    name: Summary
+    needs: [detect-credentials, test-aws-ecs, test-gcp-cloud-run, test-vercel]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate summary
+        run: |
+          echo "### Cloud Driver Manual Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Driver selected:** \`${{ github.event.inputs.driver }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Dry run:** \`${{ github.event.inputs.dry_run }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Driver | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| AWS ECS | ${{ needs.test-aws-ecs.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| GCP Cloud Run | ${{ needs.test-gcp-cloud-run.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Vercel | ${{ needs.test-vercel.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Skipped drivers have missing credentials. See docs/CLOUD_DRIVER_VERIFICATION.md." >> $GITHUB_STEP_SUMMARY
