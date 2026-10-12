@@ -26,6 +26,7 @@ import { createAgentRouter } from './routes/agent.routes';
 import { createFinOpsRouter } from './routes/finops.routes';
 import { createMarketplaceRouter } from './routes/marketplace.routes';
 import { createAnalyticsRouter } from './routes/analytics.routes';
+import { createGDPRRouter } from './routes/gdpr.routes';
 
 // ============================================================
 // MIDDLEWARE
@@ -173,6 +174,9 @@ app.use('/api/v1/finops', ...protectedMiddleware, createFinOpsRouter());
 // Analytics (metrics, KPI, funnels, cohort, predictive, NL query)
 app.use('/api/v1/analytics', ...protectedMiddleware, createAnalyticsRouter());
 
+// GDPR (data export, deletion)
+app.use('/api/v1', ...protectedMiddleware, createGDPRRouter());
+
 // ============================================================
 // 404 HANDLER
 // ============================================================
@@ -247,6 +251,7 @@ const server = app.listen(port, host, () => {
     finops: '/api/v1/finops',
     marketplace: '/api/v1/marketplace',
     analytics: '/api/v1/analytics',
+    gdpr: '/api/v1/users/me/export, /api/v1/users/me, /api/v1/tenants/me/export',
   });
 
   // Start workflow scheduler
@@ -270,7 +275,6 @@ const shutdown = async (signal: string) => {
   isShuttingDown = true;
   logger.info(`${signal} received, shutting down gracefully...`);
 
-  // Stop scheduler
   try {
     const scheduler = getSchedulerService();
     scheduler.stop();
@@ -281,7 +285,6 @@ const shutdown = async (signal: string) => {
     });
   }
 
-  // Cleanup workflow engine
   if (workflowEngine) {
     try {
       workflowEngine.cleanup();
@@ -293,13 +296,11 @@ const shutdown = async (signal: string) => {
     }
   }
 
-  // Close HTTP server
   server.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
   });
 
-  // Force shutdown after 10 seconds
   setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
