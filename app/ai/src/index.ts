@@ -42,6 +42,8 @@ import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
 import { getSchedulerService } from './lib/workflow/scheduler.service';
 import { getRetentionScheduler } from './lib/retention/retention.scheduler';
+import { getQueueService, isQueueEnabled } from './lib/queue/queue.service';
+import { getWorkerService } from './lib/queue/worker.service';
 import { logger } from './lib/observability/logger';
 
 // ============================================================
@@ -199,6 +201,10 @@ app.use(
 // START SERVER
 // ============================================================
 
+// Module-scope references for graceful shutdown
+let queueServiceRef: ReturnType<typeof getQueueService> | undefined;
+let workerServiceRef: ReturnType<typeof getWorkerService> | undefined;
+
 const server = app.listen(port, host, () => {
   logger.info('🚀 VYENFITA AI Service started', {
     host,
@@ -238,6 +244,24 @@ const server = app.listen(port, host, () => {
   const retentionScheduler = getRetentionScheduler();
   retentionScheduler.start();
   logger.info('🧹 Retention scheduler started');
+
+  // Start BullMQ workers (if enabled)
+  if (isQueueEnabled()) {
+    try {
+      queueServiceRef = getQueueService();
+      workerServiceRef = getWorkerService();
+      workerServiceRef.start();
+      logger.info('🔧 BullMQ workers started');
+    } catch (error) {
+      logger.error('Failed to start BullMQ workers, falling back to legacy schedulers', {
+        error: error instanceof Error ? error.message : 'Unknown',
+      });
+      queueServiceRef = undefined;
+      workerServiceRef = undefined;
+    }
+  } else {
+    logger.info('ℹ️  BullMQ disabled (USE_BULLMQ != true)');
+  }
 });
 
 // ============================================================
@@ -277,6 +301,29 @@ const shutdown = async (signal: string) => {
     });
   }
 
+  // Stop BullMQ workers
+  if (workerServiceRef) {
+    try {
+      await workerServiceRef.stop();
+      logger.info('BullMQ workers stopped');
+    } catch (error) {
+      logger.warn('Error stopping BullMQ workers', {
+        error: error instanceof Error ? error.message : 'Unknown',
+      });
+    }
+  }
+
+  if (queueServiceRef) {
+    try {
+      await queueServiceRef.shutdown();
+      logger.info('Queue service shut down');
+    } catch (error) {
+      logger.warn('Error shutting down queue service', {
+        error: error instanceof Error ? error.message : 'Unknown',
+      });
+    }
+  }
+
   // Cleanup workflow engine
   if (workflowEngine) {
     try {
@@ -295,7 +342,6 @@ const shutdown = async (signal: string) => {
     process.exit(0);
   });
 
-  // Force shutdown after 10 seconds
   setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
