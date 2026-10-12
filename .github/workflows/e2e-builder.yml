@@ -1,0 +1,99 @@
+name: E2E — Builder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/client/src/vyenfita/builder/**'
+      - 'app/client/e2e/**'
+      - '.github/workflows/e2e-builder.yml'
+  pull_request:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/client/src/vyenfita/builder/**'
+      - 'app/client/e2e/**'
+
+jobs:
+  e2e-builder:
+    name: Builder E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install client dependencies
+        run: |
+          cd app/client
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Install E2E dependencies
+        run: |
+          cd app/client/e2e
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Install Playwright browsers
+        run: |
+          cd app/client/e2e
+          yarn install:browsers
+
+      - name: Start client dev server
+        run: |
+          cd app/client
+          nohup yarn start > /tmp/client.log 2>&1 &
+          echo "CLIENT_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for client to be ready
+        run: |
+          echo "Waiting for http://localhost:3000..."
+          for i in {1..60}; do
+            if curl -sf -o /dev/null http://localhost:3000; then
+              echo "✅ Client is ready"
+              exit 0
+            fi
+            echo "Attempt $i/60..."
+            sleep 5
+          done
+          echo "❌ Client did not start in time"
+          tail -100 /tmp/client.log
+          exit 1
+
+      - name: Run E2E tests
+        env:
+          E2E_BASE_URL: http://localhost:3000
+        run: |
+          cd app/client/e2e
+          yarn test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-builder-playwright-report
+          path: app/client/e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-builder-traces
+          path: app/client/e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Show client logs on failure
+        if: failure()
+        run: |
+          echo "=== CLIENT LOG (last 100 lines) ==="
+          tail -100 /tmp/client.log || echo "no client log"
