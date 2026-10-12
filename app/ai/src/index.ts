@@ -41,6 +41,7 @@ import { ObservabilityMiddleware } from './middleware/observability.middleware';
 import { ProviderConfigManager } from './config/providers.config';
 import { WorkflowEngine } from './core/engine/workflow-engine';
 import { getSchedulerService } from './lib/workflow/scheduler.service';
+import { getRetentionScheduler } from './lib/retention/retention.scheduler';
 import { logger } from './lib/observability/logger';
 
 // ============================================================
@@ -129,13 +130,8 @@ if (process.env.AI_RATE_LIMIT_ENABLED !== 'false') {
 // PUBLIC ROUTES (no auth)
 // ============================================================
 
-// Observability endpoints (/health, /metrics, etc.)
 app.use('/', createObservabilityRouter());
-
-// Auth endpoints (/api/v1/auth/*)
 app.use('/api/v1/auth', createAuthRouter());
-
-// Marketplace public read endpoints (/api/v1/marketplace/templates, etc.)
 app.use('/api/v1/marketplace', createMarketplaceRouter());
 
 // ============================================================
@@ -144,37 +140,16 @@ app.use('/api/v1/marketplace', createMarketplaceRouter());
 
 const protectedMiddleware = [AuthMiddleware.validate, TenantMiddleware.enforce];
 
-// AI generation and chat
 app.use('/api/v1/ai', ...protectedMiddleware, createAIRouter());
-
-// Applications CRUD
 app.use('/api/v1/applications', ...protectedMiddleware, createApplicationRouter());
-
-// Workflows CRUD + execution
 app.use('/api/v1/workflows', ...protectedMiddleware, createWorkflowRouter());
-
-// Tenant management
 app.use('/api/v1/tenant', ...protectedMiddleware, createTenantRouter());
-
-// Advanced features (NL to SQL, Scheduled reports, Code generation)
 app.use('/api/v1/advanced', ...protectedMiddleware, createAdvancedRouter());
-
-// Enterprise features (SSO, Audit, RBAC)
 app.use('/api/v1/enterprise', ...protectedMiddleware, createEnterpriseRouter());
-
-// Deployments
 app.use('/api/v1/deployments', ...protectedMiddleware, createDeploymentRouter());
-
-// AI Agents
 app.use('/api/v1/agents', ...protectedMiddleware, createAgentRouter());
-
-// FinOps (cost management)
 app.use('/api/v1/finops', ...protectedMiddleware, createFinOpsRouter());
-
-// Analytics (metrics, KPI, funnels, cohort, predictive, NL query)
 app.use('/api/v1/analytics', ...protectedMiddleware, createAnalyticsRouter());
-
-// GDPR (data export, deletion)
 app.use('/api/v1', ...protectedMiddleware, createGDPRRouter());
 
 // ============================================================
@@ -258,6 +233,11 @@ const server = app.listen(port, host, () => {
   const scheduler = getSchedulerService();
   scheduler.start();
   logger.info('⏰ Workflow Scheduler started');
+
+  // Start retention scheduler
+  const retentionScheduler = getRetentionScheduler();
+  retentionScheduler.start();
+  logger.info('🧹 Retention scheduler started');
 });
 
 // ============================================================
@@ -275,16 +255,29 @@ const shutdown = async (signal: string) => {
   isShuttingDown = true;
   logger.info(`${signal} received, shutting down gracefully...`);
 
+  // Stop workflow scheduler
   try {
     const scheduler = getSchedulerService();
     scheduler.stop();
-    logger.info('Scheduler stopped');
+    logger.info('Workflow scheduler stopped');
   } catch (error) {
-    logger.warn('Error stopping scheduler', {
+    logger.warn('Error stopping workflow scheduler', {
       error: error instanceof Error ? error.message : 'Unknown',
     });
   }
 
+  // Stop retention scheduler
+  try {
+    const retentionScheduler = getRetentionScheduler();
+    retentionScheduler.stop();
+    logger.info('Retention scheduler stopped');
+  } catch (error) {
+    logger.warn('Error stopping retention scheduler', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+  }
+
+  // Cleanup workflow engine
   if (workflowEngine) {
     try {
       workflowEngine.cleanup();
@@ -296,11 +289,13 @@ const shutdown = async (signal: string) => {
     }
   }
 
+  // Close HTTP server
   server.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
   });
 
+  // Force shutdown after 10 seconds
   setTimeout(() => {
     logger.error('Forced shutdown after timeout');
     process.exit(1);
