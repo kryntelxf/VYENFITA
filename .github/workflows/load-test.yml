@@ -1,0 +1,65 @@
+name: Load Test (k6)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Which scenario to run'
+        required: true
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - load
+          - stress
+          - spike
+      target_url:
+        description: 'Target base URL (must be reachable from GitHub Actions)'
+        required: true
+        default: 'https://staging-api.vyenfita.com'
+        type: string
+
+jobs:
+  load-test:
+    name: Run k6 — ${{ github.event.inputs.scenario }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: load-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+          k6 version
+
+      - name: Run k6 scenario
+        env:
+          BASE_URL: ${{ github.event.inputs.target_url }}
+        run: |
+          cd app/ai/load-tests
+          k6 run --summary-export=k6-summary.json scenarios/${{ github.event.inputs.scenario }}.js
+
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary-${{ github.event.inputs.scenario }}
+          path: app/ai/load-tests/k6-summary.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Load Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Scenario:** ${{ github.event.inputs.scenario }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target:** ${{ github.event.inputs.target_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Result:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
