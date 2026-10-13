@@ -1,0 +1,48 @@
+# ============================================================
+# VYENFITA Local Observability Stack
+# ============================================================
+# 
+# Runs Jaeger (all-in-one) for local trace inspection.
+# 
+# Usage:
+#   docker compose -f deploy/observability/docker-compose.jaeger.yml up -d
+#   open http://localhost:16686  # Jaeger UI
+#
+# Then in your .env:
+#   OTEL_ENABLED=true
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+# ============================================================
+
+version: '3.8'
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: vyenfita-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "5778:5778"     # Config
+      - "14250:14250"   # gRPC collector
+      - "14268:14268"   # HTTP collector
+      - "6831:6831/udp" # Legacy agent compact
+      - "6832:6832/udp" # Legacy agent binary
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=memory
+      - MEMORY_MAX_TRACES=10000
+      - LOG_LEVEL=info
+
+  redis:
+    image: redis:7-alpine
+    container_name: vyenfita-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - vyenfita-redis-data:/data
+
+volumes:
+  vyenfita-redis-data:
