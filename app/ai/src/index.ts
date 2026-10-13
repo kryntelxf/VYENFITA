@@ -1,3 +1,12 @@
+// ============================================================
+// OpenTelemetry MUST be initialized before any other import
+// Auto-instrumentation hooks must be installed before modules
+// like express / ioredis are loaded.
+// ============================================================
+import { initTracing, shutdownTracing } from './lib/tracing/tracing.init';
+
+initTracing();
+
 /**
  * VYENFITA AI Service - Entry Point
  * 
@@ -34,6 +43,7 @@ import { createGDPRRouter } from './routes/gdpr.routes';
 import { AuthMiddleware } from './middleware/auth.middleware';
 import { TenantMiddleware } from './middleware/tenant.middleware';
 import { ObservabilityMiddleware } from './middleware/observability.middleware';
+import { enrichTracingContext } from './lib/tracing/tracing.middleware';
 
 // ============================================================
 // SERVICES
@@ -140,7 +150,11 @@ app.use('/api/v1/marketplace', createMarketplaceRouter());
 // PROTECTED ROUTES (auth + tenant isolation)
 // ============================================================
 
-const protectedMiddleware = [AuthMiddleware.validate, TenantMiddleware.enforce];
+const protectedMiddleware = [
+  AuthMiddleware.validate,
+  TenantMiddleware.enforce,
+  enrichTracingContext,
+];
 
 app.use('/api/v1/ai', ...protectedMiddleware, createAIRouter());
 app.use('/api/v1/applications', ...protectedMiddleware, createApplicationRouter());
@@ -201,7 +215,6 @@ app.use(
 // START SERVER
 // ============================================================
 
-// Module-scope references for graceful shutdown
 let queueServiceRef: ReturnType<typeof getQueueService> | undefined;
 let workerServiceRef: ReturnType<typeof getWorkerService> | undefined;
 
@@ -235,17 +248,14 @@ const server = app.listen(port, host, () => {
     gdpr: '/api/v1/users/me/export, /api/v1/users/me, /api/v1/tenants/me/export',
   });
 
-  // Start workflow scheduler
   const scheduler = getSchedulerService();
   scheduler.start();
   logger.info('⏰ Workflow Scheduler started');
 
-  // Start retention scheduler
   const retentionScheduler = getRetentionScheduler();
   retentionScheduler.start();
   logger.info('🧹 Retention scheduler started');
 
-  // Start BullMQ workers (if enabled)
   if (isQueueEnabled()) {
     try {
       queueServiceRef = getQueueService();
@@ -261,6 +271,10 @@ const server = app.listen(port, host, () => {
     }
   } else {
     logger.info('ℹ️  BullMQ disabled (USE_BULLMQ != true)');
+  }
+
+  if (process.env.OTEL_ENABLED === 'true') {
+    logger.info('🔍 OpenTelemetry tracing enabled');
   }
 });
 
@@ -279,7 +293,6 @@ const shutdown = async (signal: string) => {
   isShuttingDown = true;
   logger.info(`${signal} received, shutting down gracefully...`);
 
-  // Stop workflow scheduler
   try {
     const scheduler = getSchedulerService();
     scheduler.stop();
@@ -290,7 +303,6 @@ const shutdown = async (signal: string) => {
     });
   }
 
-  // Stop retention scheduler
   try {
     const retentionScheduler = getRetentionScheduler();
     retentionScheduler.stop();
@@ -301,7 +313,6 @@ const shutdown = async (signal: string) => {
     });
   }
 
-  // Stop BullMQ workers
   if (workerServiceRef) {
     try {
       await workerServiceRef.stop();
@@ -324,7 +335,6 @@ const shutdown = async (signal: string) => {
     }
   }
 
-  // Cleanup workflow engine
   if (workflowEngine) {
     try {
       workflowEngine.cleanup();
@@ -336,7 +346,15 @@ const shutdown = async (signal: string) => {
     }
   }
 
-  // Close HTTP server
+  // Shutdown tracing (flush pending spans)
+  try {
+    await shutdownTracing();
+  } catch (error) {
+    logger.warn('Error shutting down tracing', {
+      error: error instanceof Error ? error.message : 'Unknown',
+    });
+  }
+
   server.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);
