@@ -1,7 +1,7 @@
 # VYENFITA P2 Roadmap
 
 **Created:** 2026-10-11
-**Last updated:** 2026-10-12
+**Last updated:** 2026-10-13
 **Status:** Active roadmap for P2 (Important) and P3 (Polish) work.
 
 ---
@@ -18,84 +18,49 @@ Items below can be done **without cloud accounts**.
 ### ✅ P2.2 — Data Export API (GDPR)
 
 - **Status:** DONE (2026-10-12)
-- **Why:** GDPR Article 15 (right to access) and Article 17 (right to erasure)
-  require users to be able to export and delete their data.
-
 - **Deliverables:**
-  - `GET /api/v1/users/me/export` — export all personal data (JSON)
-  - `GET /api/v1/tenants/me/export` — admin export for full tenant
-  - `DELETE /api/v1/users/me` — soft-delete + schedule hard delete in 30 days
-  - `POST /api/v1/users/me/deletion/cancel` — cancel pending deletion
+  - `GET /api/v1/users/me/export`
+  - `GET /api/v1/tenants/me/export` (admin)
+  - `DELETE /api/v1/users/me` (with 30-day grace)
+  - `POST /api/v1/users/me/deletion/cancel`
   - Unit tests (~30)
   - `docs/GDPR.md`
-
-- **Key decisions:**
-  - Hard delete = **anonymization** (keeps user row for FK + audit trail)
-  - Sole owner of tenant cannot delete account (must transfer/delete tenant first)
-  - Every GDPR action is audited
 
 ### ✅ P2.3 — Data Retention Automated Cleanup
 
 - **Status:** DONE (2026-10-12)
-- **Why:** GDPR Article 5(1)(e) — storage limitation. Also reduces DB size.
-
 - **Deliverables:**
-  - `RetentionService` — 6 cleanup tasks
-  - `RetentionScheduler` — runs daily at 03:00 UTC
-  - Cleanup targets:
-    - `audit_events` older than 90 days
-    - `workflow_executions` older than 30 days
-    - `agent_steps` for runs older than 90 days
-    - `sessions` expired > 30 days ago
-    - `oauth_states` expired > 60 min ago
-    - soft-deleted users past grace period → anonymize
-  - Metrics: `vyenfita_retention_deleted_total{entity="..."}`
-  - Dry-run mode
+  - `RetentionService` (6 cleanup tasks)
+  - `RetentionScheduler` (daily 03:00 UTC)
+  - Metrics: `vyenfita_retention_deleted_total`
   - Unit tests (~25)
   - `docs/DATA_RETENTION.md`
 
-### 🚧 P2.4 — Frontend Builder E2E Test (Playwright)
+### ✅ P2.4 — Frontend Builder E2E Test (Playwright)
+
+- **Status:** DONE (2026-10-13)
+- **Deliverables:**
+  - Playwright config + 5 spec files (load, drag-drop, properties, undo-redo, templates)
+  - CI workflow `.github/workflows/e2e-builder.yml`
+  - `docs/E2E_TESTING.md` + `app/client/e2e/README.md`
+  - Screenshots + traces auto-uploaded on failure
+- **Note:** Full coverage awaits `data-testid` instrumentation
+
+### ✅ P2.5 — Job Queue (BullMQ)
+
+- **Status:** DONE (2026-10-13)
+- **Deliverables:**
+  - `QueueService` (4 queues: workflow, agent, retention, report)
+  - `WorkerService` (with per-queue concurrency)
+  - 4 handlers + tests
+  - Feature flag `USE_BULLMQ=true` (legacy fallback preserved)
+  - `docs/JOB_QUEUE.md`
+  - Metrics + health check
+- **Note:** Redis required when enabled; local dev can keep `USE_BULLMQ=false`
+
+### 🚧 P2.6 — Distributed Tracing (Jaeger)
 
 - **Status:** NEXT
-- **Why:** Builder is critical UI but never tested end-to-end.
-
-- **Deliverables:**
-  - Playwright config for `app/client`
-  - Tests:
-    - Load builder
-    - Drag widget from palette to canvas
-    - Resize widget
-    - Delete widget
-    - Undo/redo
-    - Save application
-    - Preview mode
-  - CI workflow `.github/workflows/e2e-builder.yml`
-  - Screenshots on failure
-
-- **Dependencies:** Playwright install
-- **Estimate:** 2-3 hours
-
-### ⏸ P2.5 — Job Queue (BullMQ)
-
-- **Why:** Current scheduler uses `setInterval` which loses jobs on restart.
-
-- **Deliverables:**
-  - Add `bullmq` + `ioredis` dependencies
-  - Replace `getSchedulerService()` with BullMQ queue
-  - Job types:
-    - `workflow.execute`
-    - `agent.run`
-    - `report.generate`
-    - `retention.cleanup`
-  - Retry with exponential backoff
-  - Dead letter queue
-  - Unit tests
-
-- **Dependencies:** Redis (local in dev, Upstash free tier for prod)
-- **Estimate:** 3-4 hours
-
-### ⏸ P2.6 — Distributed Tracing (Jaeger)
-
 - **Why:** Debug production issues across services.
 
 - **Deliverables:**
@@ -226,9 +191,9 @@ A P2 item is DONE when:
 | P2.1 Handoff | ✅ DONE | 2026-10-11 |
 | P2.2 GDPR Export | ✅ DONE | 2026-10-12 |
 | P2.3 Retention | ✅ DONE | 2026-10-12 |
-| P2.4 Playwright E2E | 🚧 NEXT | — |
-| P2.5 BullMQ | ⏸ | — |
-| P2.6 Jaeger | ⏸ | — |
+| P2.4 Playwright E2E | ✅ DONE | 2026-10-13 |
+| P2.5 BullMQ | ✅ DONE | 2026-10-13 |
+| P2.6 Jaeger | 🚧 NEXT | — |
 | P2.7 k6 Load Test | ⏸ | — |
 | P2.8 Pentest | ⏸ | — |
 | P3.1 Docs Update | ⏸ | — |
@@ -246,12 +211,12 @@ Based on impact vs effort:
 1. **P2.1 Handoff** ← DONE
 2. **P2.2 Data Export API** ← DONE
 3. **P2.3 Retention Cleanup** ← DONE
-4. **P2.4 Frontend Builder E2E** ← NEXT
-5. **P3.1 Documentation Update**
-6. **P2.5 Job Queue (BullMQ)**
-7. **P2.6 Distributed Tracing**
-8. **P2.7 Load Testing**
-9. **P2.8 Penetration Testing**
+4. **P2.4 Frontend Builder E2E** ← DONE
+5. **P2.5 Job Queue (BullMQ)** ← DONE
+6. **P2.6 Distributed Tracing** ← NEXT
+7. **P2.7 Load Testing**
+8. **P2.8 Penetration Testing**
+9. **P3.1 Documentation Update**
 10. **P3.2–P3.5 Polish items**
 
 ---
