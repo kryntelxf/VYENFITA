@@ -194,4 +194,4 @@ export function createApplicationRouter(): Router {
   });
 
   return router;
-        }
+}
