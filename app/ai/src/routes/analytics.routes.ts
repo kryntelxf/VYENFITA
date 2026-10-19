@@ -84,4 +84,4 @@ export function createAIRouter(): Router {
   });
 
   return router;
-            }
+}
