@@ -1,40 +1,87 @@
 /**
- * VYENFITA Analytics Routes
+ * VYENFITA AI Routes (Minimal / Mock)
+ * 
+ * Placeholder endpoints for AI generation.
+ * Real AI integration will be wired in a future session.
  * 
  * @version 1.0.0
  */
 
-import { Router } from 'express';
-import { AnalyticsController } from '../controllers/analytics.controller';
+import { Router, Request, Response } from 'express';
+import { authenticate } from '../lib/auth/middleware';
 
-export function createAnalyticsRouter(): Router {
+export function createAIRouter(): Router {
   const router = Router();
-  const controller = new AnalyticsController();
 
-  // Metrics
-  router.get('/metrics', (req, res) => controller.queryMetrics(req, res));
-  router.get('/metrics/list', (req, res) => controller.listMetrics(req, res));
+  router.use(authenticate);
 
-  // KPIs
-  router.post('/kpis', (req, res) => controller.createKPI(req, res));
-  router.get('/kpis', (req, res) => controller.listKPIs(req, res));
-  router.get('/kpis/:id/report', (req, res) => controller.getKPIReport(req, res));
+  // ============================================================
+  // GENERATE APPLICATION
+  // ============================================================
+  router.post('/generate-application', async (req: Request, res: Response) => {
+    try {
+      const { description } = req.body;
 
-  // Funnels
-  router.post('/funnels', (req, res) => controller.createFunnel(req, res));
-  router.get('/funnels', (req, res) => controller.listFunnels(req, res));
-  router.get('/funnels/:id/analyze', (req, res) => controller.analyzeFunnel(req, res));
+      if (!description || typeof description !== 'string') {
+        return res.status(400).json({ success: false, error: 'description is required' });
+      }
 
-  // Cohort
-  router.post('/cohort/analyze', (req, res) => controller.analyzeCohort(req, res));
+      // Simulasi delay AI (500ms)
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-  // Predictive
-  router.post('/forecast', (req, res) => controller.forecast(req, res));
+      // Return mock response
+      return res.json({
+        success: true,
+        data: {
+          message: 'Mock AI generation successful',
+          spec: {
+            metadata: { name: 'Generated App', version: '1.0.0' },
+            entities: [],
+            pages: [{ name: 'Home', type: 'page' }],
+            roles: []
+          }
+        }
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Generation failed',
+      });
+    }
+  });
 
-  // Natural Language Query
-  router.post('/ask', (req, res) => controller.ask(req, res));
+  // ============================================================
+  // CHAT WITH AI
+  // ============================================================
+  router.post('/chat', async (req: Request, res: Response) => {
+    try {
+      const { messages } = req.body;
+
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ success: false, error: 'messages array is required' });
+      }
+
+      // Simulasi delay AI (300ms)
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
+
+      return res.json({
+        success: true,
+        data: {
+          message: {
+            role: 'assistant',
+            content: `[MOCK AI] I received your message: "${lastUserMessage?.content || 'empty'}". Real AI integration is pending.`
+          }
+        }
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Chat failed',
+      });
+    }
+  });
 
   return router;
-}
-
-export default createAnalyticsRouter;
+            }
