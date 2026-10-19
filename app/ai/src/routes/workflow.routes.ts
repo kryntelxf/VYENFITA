@@ -1,81 +1,203 @@
 /**
- * VYENFITA Workflow Routes
- * 
- * @version 2.0.0
+ * VYENFITA Workflow Routes (Minimal)
+ *
+ * CRUD endpoints for workflows with tenant isolation.
+ *
+ * @version 1.0.0
  */
 
-import { Router } from 'express';
-import { WorkflowController } from '../controllers/workflow.controller';
-import { WorkflowExecutionController } from '../controllers/workflow-execution.controller';
-import { PermissionMiddleware } from '../middleware/permission.middleware';
+import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/database/client';
+import { authenticate } from '../lib/auth/middleware';
 
 export function createWorkflowRouter(): Router {
   const router = Router();
-  const controller = new WorkflowController();
-  const execController = new WorkflowExecutionController();
 
-  // Stats BEFORE :id routes
-  router.get('/stats', (req, res) => controller.stats(req, res));
+  router.use(authenticate);
 
   // ============================================================
-  // EXECUTION ROUTES (must be BEFORE /:id)
+  // LIST WORKFLOWS
   // ============================================================
 
-  router.get(
-    '/executions/:executionId',
-    PermissionMiddleware.require('workflow:read'),
-    (req, res) => execController.get(req, res)
-  );
+  router.get('/', async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.user!.tenantId;
+      const page = parseInt(req.query.page as string || '1', 10);
+      const limit = Math.min(parseInt(req.query.limit as string || '20', 10), 100);
+      const status = req.query.status as string | undefined;
 
-  router.post(
-    '/executions/:executionId/cancel',
-    PermissionMiddleware.require('workflow:execute'),
-    (req, res) => execController.cancel(req, res)
-  );
+      const where: any = { tenantId, deletedAt: null };
+      if (status) where.status = status;
+
+      const [workflows, total] = await Promise.all([
+        prisma.workflow.findMany({
+          where,
+          orderBy: { updatedAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.workflow.count({ where }),
+      ]);
+
+      return res.json({
+        success: true,
+        data: workflows,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page * limit < total,
+          hasPrev: page > 1,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list workflows',
+      });
+    }
+  });
 
   // ============================================================
-  // CRUD ROUTES
+  // CREATE WORKFLOW
   // ============================================================
 
-  router.post(
-    '/',
-    PermissionMiddleware.require('workflow:create'),
-    (req, res) => controller.create(req, res)
-  );
+  router.post('/', async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.user!.tenantId;
+      const userId = req.user!.userId;
+      const { name, description, definition, triggers } = req.body;
 
-  router.get(
-    '/',
-    PermissionMiddleware.require('workflow:read'),
-    (req, res) => controller.list(req, res)
-  );
+      if (!name || typeof name !== 'string' || name.length < 1) {
+        return res.status(400).json({ success: false, error: 'name is required' });
+      }
+      if (name.length > 255) {
+        return res.status(400).json({ success: false, error: 'name too long (max 255)' });
+      }
+      if (!definition || typeof definition !== 'object') {
+        return res.status(400).json({ success: false, error: 'definition is required' });
+      }
 
-  router.get(
-    '/:id',
-    PermissionMiddleware.require('workflow:read'),
-    (req, res) => controller.get(req, res)
-  );
+      const baseSlug = name
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 80) || 'workflow';
+      const slug = `${baseSlug}-${Date.now()}`;
 
-  router.delete(
-    '/:id',
-    PermissionMiddleware.require('workflow:delete'),
-    (req, res) => controller.delete(req, res)
-  );
+      const result = await prisma.$transaction(async (tx) => {
+        const workflow = await tx.workflow.create({
+          data: {
+            tenantId,
+            name,
+            description: description || null,
+            slug,
+            status: 'draft',
+            triggers: triggers || [],
+          },
+        });
+
+        const version = await tx.workflowVersion.create({
+          data: {
+            workflowId: workflow.id,
+            version: '1.0.0',
+            definition,
+            changelog: 'Initial version',
+            createdBy: userId,
+            isCurrent: true,
+          },
+        });
+
+        const updated = await tx.workflow.update({
+          where: { id: workflow.id },
+          data: { currentVersionId: version.id },
+        });
+
+        return { workflow: updated, version };
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          ...result.workflow,
+          currentVersion: result.version,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create workflow',
+      });
+    }
+  });
 
   // ============================================================
-  // EXECUTION ROUTES (per-workflow)
+  // GET BY ID
   // ============================================================
 
-  router.post(
-    '/:id/execute',
-    PermissionMiddleware.require('workflow:execute'),
-    (req, res) => execController.execute(req, res)
-  );
+  router.get('/:id', async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.user!.tenantId;
+      const { id } = req.params;
 
-  router.get(
-    '/:id/executions',
-    PermissionMiddleware.require('workflow:read'),
-    (req, res) => execController.list(req, res)
-  );
+      const workflow = await prisma.workflow.findFirst({
+        where: { id, tenantId, deletedAt: null },
+      });
+
+      if (!workflow) {
+        return res.status(404).json({ success: false, error: 'Workflow not found' });
+      }
+
+      const currentVersion = workflow.currentVersionId
+        ? await prisma.workflowVersion.findUnique({
+            where: { id: workflow.currentVersionId },
+          })
+        : null;
+
+      return res.json({
+        success: true,
+        data: { ...workflow, currentVersion },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get workflow',
+      });
+    }
+  });
+
+  // ============================================================
+  // DELETE (soft)
+  // ============================================================
+
+  router.delete('/:id', async (req: Request, res: Response) => {
+    try {
+      const tenantId = req.user!.tenantId;
+      const { id } = req.params;
+
+      const workflow = await prisma.workflow.findFirst({
+        where: { id, tenantId, deletedAt: null },
+      });
+
+      if (!workflow) {
+        return res.status(404).json({ success: false, error: 'Workflow not found' });
+      }
+
+      await prisma.workflow.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+
+      return res.json({ success: true, message: 'Workflow deleted' });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete workflow',
+      });
+    }
+  });
 
   return router;
-    }
+          }
