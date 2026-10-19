@@ -20,7 +20,7 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', mode: 'minimal-with-auth-apps-workflows-ai-analytics-market' });
+  res.json({ status: 'ok', mode: 'all-modules-loaded' });
 });
 
 app.post('/api/v1/auth/register', async (req, res) => {
