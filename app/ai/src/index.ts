@@ -82,7 +82,7 @@ app.use('/api/v1/applications', createApplicationRouter());
 app.use('/api/v1/workflows', createWorkflowRouter());
 
 // ============================================================
-// AI ROUTES (Mock)
+// AI ROUTES
 // ============================================================
 app.use('/api/v1/ai', createAIRouter());
 
