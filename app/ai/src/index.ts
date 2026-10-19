@@ -69,7 +69,9 @@ app.post('/api/v1/auth/login', async (req, res) => {
   }
 });
 
-// MOUNT APPLICATION ROUTES
+// ============================================================
+// APPLICATION ROUTES
+// ============================================================
 app.use('/api/v1/applications', createApplicationRouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
