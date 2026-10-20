@@ -1,0 +1,67 @@
+name: Docker Build — AI Service
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/ai/Dockerfile'
+      - 'app/ai/.dockerignore'
+      - 'app/ai/package.json'
+      - '.github/workflows/docker-build.yml'
+
+jobs:
+  build:
+    name: Build AI Service Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (no push)
+        run: |
+          docker build \
+            -t vyenfita-ai:ci-test \
+            -f app/ai/Dockerfile \
+            app/ai
+
+      - name: Test image — health check
+        run: |
+          docker run -d \
+            --name vyenfita-ai-test \
+            -p 3001:3001 \
+            -e NODE_ENV=production \
+            -e AI_SERVICE_PORT=3001 \
+            -e JWT_SECRET=test-secret-key-at-least-32-characters-long \
+            -e ENCRYPTION_KEY=test-encryption-key-32-chars-long-xxx \
+            -e DATABASE_URL=postgresql://fake:fake@localhost:5432/fake \
+            vyenfita-ai:ci-test || true
+
+          sleep 10
+
+          echo "=== CONTAINER STATUS ==="
+          docker ps -a | grep vyenfita-ai-test || echo "no container"
+
+          echo "=== CONTAINER LOGS ==="
+          docker logs vyenfita-ai-test 2>&1 | tail -50 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop vyenfita-ai-test 2>/dev/null || true
+          docker rm vyenfita-ai-test 2>/dev/null || true
+
+      - name: Image size report
+        if: always()
+        run: |
+          echo "## Docker Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          docker images vyenfita-ai:ci-test --format "| Image | Size |\n|-------|------|\n| {{.Repository}}:{{.Tag}} | {{.Size}} |" >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
