@@ -10,6 +10,7 @@ import { createWorkflowRouter } from './routes/workflow.routes';
 import { createAIRouter } from './routes/ai.routes';
 import { createAnalyticsRouter } from './routes/analytics.routes';
 import { createMarketplaceRouter } from './routes/marketplace.routes';
+import { createAgentRouter } from './routes/agent.routes';
 
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
@@ -21,6 +22,24 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', mode: 'all-modules-loaded' });
+});
+
+app.get('/health/liveness', (_req, res) => {
+  res.json({ status: 'alive', timestamp: new Date().toISOString() });
+});
+
+app.get('/health/readiness', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ready', checks: { database: 'ok' } });
+  } catch (error: any) {
+    res.status(503).json({ status: 'not_ready', error: error.message });
+  }
+});
+
+app.get('/metrics', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send('# HELP vyenfita_up\n# TYPE vyenfita_up gauge\nvyenfita_up 1\n');
 });
 
 app.post('/api/v1/auth/register', async (req, res) => {
@@ -73,30 +92,12 @@ app.post('/api/v1/auth/login', async (req, res) => {
   }
 });
 
-// ============================================================
-// APPLICATION ROUTES
-// ============================================================
 app.use('/api/v1/applications', createApplicationRouter());
-
-// ============================================================
-// WORKFLOW ROUTES
-// ============================================================
 app.use('/api/v1/workflows', createWorkflowRouter());
-
-// ============================================================
-// AI ROUTES
-// ============================================================
 app.use('/api/v1/ai', createAIRouter());
-
-// ============================================================
-// ANALYTICS ROUTES
-// ============================================================
 app.use('/api/v1/analytics', createAnalyticsRouter());
-
-// ============================================================
-// MARKETPLACE ROUTES
-// ============================================================
 app.use('/api/v1/marketplace', createMarketplaceRouter());
+app.use('/api/v1/agents', createAgentRouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
