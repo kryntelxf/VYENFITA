@@ -31,6 +31,18 @@ import { createCommentsRouter } from './routes/comments.routes';
 import { createDashboardRouter } from './routes/dashboard.routes';
 import { createIntegrationsOAuthRouter } from './routes/integrations-oauth.routes';
 import { createMonitoringRouter } from './routes/monitoring.routes';
+import { createAIAgentsAdvancedRouter } from './routes/ai-agents-advanced.routes';
+import { createMultiLanguageRouter } from './routes/multi-language.routes';
+import { createDataExportRouter } from './routes/data-export.routes';
+import { createNotificationsAdvancedRouter } from './routes/notifications-advanced.routes';
+import { createRateLimitingRouter } from './routes/rate-limiting.routes';
+import { createTenantQuotasRouter } from './routes/tenant-quotas.routes';
+import { createUsageMetricsRouter } from './routes/usage-metrics.routes';
+import { createScheduledTasksRouter } from './routes/scheduled-tasks.routes';
+import { createFileStorageRouter } from './routes/file-storage.routes';
+import { createAPIKeysRouter } from './routes/api-keys.routes';
+import { createWebhooksOutboundRouter } from './routes/webhooks-outbound.routes';
+import { createSupportTicketsRouter } from './routes/support-tickets.routes';
 
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
@@ -91,8 +103,6 @@ app.use('/api/v1/tenant', createTenantRouter());
 app.use('/api/v1/audit', createAuditRouter());
 app.use('/api/v1/search', createSearchRouter());
 app.use('/api/v1/webhooks', createWebhookRouter());
-
-// NEW ROUTERS
 app.use('/api/v1/analytics-advanced', createAnalyticsAdvancedRouter());
 app.use('/api/v1/billing', createBillingRouter());
 app.use('/api/v1/organization', createOrganizationRouter());
@@ -103,6 +113,20 @@ app.use('/api/v1/comments', createCommentsRouter());
 app.use('/api/v1/dashboards', createDashboardRouter());
 app.use('/api/v1/oauth', createIntegrationsOAuthRouter());
 app.use('/api/v1/monitoring', createMonitoringRouter());
+
+// NEW ROUTERS
+app.use('/api/v1/agents-advanced', createAIAgentsAdvancedRouter());
+app.use('/api/v1/i18n', createMultiLanguageRouter());
+app.use('/api/v1/gdpr', createDataExportRouter());
+app.use('/api/v1/notifications', createNotificationsAdvancedRouter());
+app.use('/api/v1/rate-limits', createRateLimitingRouter());
+app.use('/api/v1/quotas', createTenantQuotasRouter());
+app.use('/api/v1/usage', createUsageMetricsRouter());
+app.use('/api/v1/scheduled-tasks', createScheduledTasksRouter());
+app.use('/api/v1/files', createFileStorageRouter());
+app.use('/api/v1/api-keys', createAPIKeysRouter());
+app.use('/api/v1/outbound-webhooks', createWebhooksOutboundRouter());
+app.use('/api/v1/support', createSupportTicketsRouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
