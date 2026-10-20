@@ -2,6 +2,7 @@ name: Appsmith Playwright E2E
 
 # Invoked only via playwright-e2e.yml (or another orchestrator) so Docker image + run_id align.
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       project:
