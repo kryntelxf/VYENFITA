@@ -8,19 +8,25 @@ export function createNotificationsAdvancedRouter(): Router {
 
   router.get('/preferences', async (req: Request, res: Response) => {
     try {
-      const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-      const metadata = (user?.metadata as any) || {};
-      return res.json({ success: true, data: { email: metadata.notificationPrefs?.email ?? true, inApp: metadata.notificationPrefs?.inApp ?? true, desktop: metadata.notificationPrefs?.desktop ?? false, weekly: metadata.notificationPrefs?.weekly ?? true } });
+      const tenantId = req.user!.tenantId;
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      const settings = (tenant?.settings as any) || {};
+      const prefs = settings.notificationPrefs || {};
+
+      return res.json({ success: true, data: { email: prefs.email ?? true, inApp: prefs.inApp ?? true, desktop: prefs.desktop ?? false, weekly: prefs.weekly ?? true } });
     } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
 
   router.patch('/preferences', async (req: Request, res: Response) => {
     try {
-      const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-      if (!user) return res.status(404).json({ success: false, error: 'Not found' });
-      const existing = (user.metadata as any) || {};
-      const newPrefs = { ...(existing.notificationPrefs || {}), ...req.body };
-      await prisma.user.update({ where: { id: req.user!.userId }, data: { metadata: { ...existing, notificationPrefs: newPrefs } } });
+      const tenantId = req.user!.tenantId;
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) return res.status(404).json({ success: false, error: 'Not found' });
+
+      const settings = (tenant.settings as any) || {};
+      const newPrefs = { ...(settings.notificationPrefs || {}), ...req.body };
+
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settings: { ...settings, notificationPrefs: newPrefs } } });
       return res.json({ success: true, data: newPrefs });
     } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
@@ -35,10 +41,12 @@ export function createNotificationsAdvancedRouter(): Router {
 
   router.post('/mark-all-read', async (req: Request, res: Response) => {
     try {
-      const user = await prisma.user.findUnique({ where: { id: req.user!.userId } });
-      if (!user) return res.status(404).json({ success: false, error: 'Not found' });
-      const existing = (user.metadata as any) || {};
-      await prisma.user.update({ where: { id: req.user!.userId }, data: { metadata: { ...existing, notificationsReadAt: new Date().toISOString() } } });
+      const tenantId = req.user!.tenantId;
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) return res.status(404).json({ success: false, error: 'Not found' });
+
+      const settings = (tenant.settings as any) || {};
+      await prisma.tenant.update({ where: { id: tenantId }, data: { settings: { ...settings, notificationsReadAt: new Date().toISOString() } } });
       return res.json({ success: true, message: 'Marked' });
     } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
