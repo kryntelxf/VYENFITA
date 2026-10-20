@@ -65,6 +65,7 @@ jobs:
               echo "✅ Client ready"
               break
             fi
+            echo "Attempt $i/60..."
             sleep 5
           done
 
