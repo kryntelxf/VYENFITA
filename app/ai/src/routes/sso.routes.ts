@@ -1,11 +1,3 @@
-/**
- * VYENFITA SSO + SCIM Routes (Minimal)
- *
- * SSO provider management + SCIM 2.0 user provisioning.
- *
- * @version 1.0.0
- */
-
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/database/client';
 import { authenticate } from '../lib/auth/middleware';
@@ -13,157 +5,84 @@ import { SecretService } from '../lib/security/secret.service';
 
 export function createSSORouter(): Router {
   const router = Router();
-
-  // Lazy-init secret service
   let secretService: SecretService | null = null;
-  const getSecret = (): SecretService => {
-    if (!secretService) secretService = new SecretService();
-    return secretService;
-  };
+  const getSecret = (): SecretService => { if (!secretService) secretService = new SecretService(); return secretService; };
 
-  // ============================================================
-  // SSO — LIST PROVIDERS
-  // ============================================================
   router.get('/sso/providers', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
       const connections = await prisma.integrationConnection.findMany({
-        where: { tenantId, integrationType: { startsWith: 'sso-' } },
-        select: { id: true, name: true, status: true, config: true, createdAt: true, updatedAt: true },
+        where: { tenantId: req.user!.tenantId, integrationType: { startsWith: 'sso-' } },
+        select: { id: true, name: true, status: true, config: true, connectedAt: true, updatedAt: true },
       });
-
       const providers = connections.map((c) => ({
-        id: c.id,
-        name: c.name,
-        type: (c.config as any)?.type || 'oidc',
-        enabled: c.status === 'connected',
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
+        id: c.id, name: c.name, type: (c.config as any)?.type || 'oidc',
+        enabled: c.status === 'connected', createdAt: c.connectedAt, updatedAt: c.updatedAt,
       }));
-
       return res.json({ success: true, data: providers, count: providers.length });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
-    }
+    } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
 
-  // ============================================================
-  // SSO — REGISTER PROVIDER
-  // ============================================================
   router.post('/sso/providers', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const userId = req.user!.userId;
       const { name, type, config } = req.body;
+      if (!name || !['oidc', 'saml', 'oauth2', 'ldap'].includes(type) || !config) return res.status(400).json({ success: false, error: 'Invalid input' });
 
-      if (!name || typeof name !== 'string') return res.status(400).json({ success: false, error: 'name is required' });
-      if (!['oidc', 'saml', 'oauth2', 'ldap'].includes(type)) return res.status(400).json({ success: false, error: 'Invalid type' });
-      if (!config || typeof config !== 'object') return res.status(400).json({ success: false, error: 'config object is required' });
-
-      const sensitiveKeys = ['clientSecret', 'privateKey', 'bindPassword'];
       const encryptedConfig: Record<string, any> = { type };
-
       for (const [key, value] of Object.entries(config)) {
-        if (sensitiveKeys.includes(key) && typeof value === 'string') {
-          try {
-            encryptedConfig[key] = getSecret().encrypt(value);
-            encryptedConfig[`${key}Encrypted`] = true;
-          } catch {
-            return res.status(500).json({ success: false, error: 'Failed to encrypt sensitive config. Ensure ENCRYPTION_KEY is set.' });
-          }
-        } else {
-          encryptedConfig[key] = value;
-        }
+        if (['clientSecret', 'privateKey', 'bindPassword'].includes(key) && typeof value === 'string') {
+          try { encryptedConfig[key] = getSecret().encrypt(value); encryptedConfig[`${key}Encrypted`] = true; } 
+          catch { return res.status(500).json({ success: false, error: 'Encrypt failed' }); }
+        } else { encryptedConfig[key] = value; }
       }
 
       const connection = await prisma.integrationConnection.create({
-        data: { tenantId, integrationType: `sso-${type}`, name, status: 'connected', config: encryptedConfig, connectedBy: userId },
-        select: { id: true, name: true, integrationType: true, status: true, createdAt: true },
+        data: { tenantId: req.user!.tenantId, integrationType: `sso-${type}`, name, status: 'connected', config: encryptedConfig, connectedBy: req.user!.userId },
+        select: { id: true, name: true, integrationType: true, status: true, connectedAt: true },
       });
 
-      return res.status(201).json({ success: true, data: { id: connection.id, name: connection.name, type, enabled: true, createdAt: connection.createdAt } });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
-    }
+      return res.status(201).json({ success: true, data: { id: connection.id, name: connection.name, type, enabled: true, createdAt: connection.connectedAt } });
+    } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
 
-  // ============================================================
-  // SSO — UPDATE PROVIDER
-  // ============================================================
   router.patch('/sso/providers/:id', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const { name, config, enabled } = req.body;
-
-      const existing = await prisma.integrationConnection.findFirst({
-        where: { id: req.params.id, tenantId, integrationType: { startsWith: 'sso-' } },
-      });
-      if (!existing) return res.status(404).json({ success: false, error: 'SSO provider not found' });
+      const existing = await prisma.integrationConnection.findFirst({ where: { id: req.params.id, tenantId: req.user!.tenantId, integrationType: { startsWith: 'sso-' } } });
+      if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
 
       const oldConfig = (existing.config as Record<string, any>) || {};
-      const newConfig = config ? { ...oldConfig, ...config, type: oldConfig.type } : oldConfig;
+      const newConfig = req.body.config ? { ...oldConfig, ...req.body.config, type: oldConfig.type } : oldConfig;
 
       const updated = await prisma.integrationConnection.update({
         where: { id: existing.id },
-        data: {
-          ...(name !== undefined && { name }),
-          ...(enabled !== undefined && { status: enabled ? 'connected' : 'disconnected' }),
-          config: newConfig,
-        },
+        data: { ...(req.body.name && { name: req.body.name }), ...(req.body.enabled !== undefined && { status: req.body.enabled ? 'connected' : 'disconnected' }), config: newConfig },
         select: { id: true, name: true, status: true, updatedAt: true },
       });
-
       return res.json({ success: true, data: updated });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
-    }
+    } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
 
-  // ============================================================
-  // SSO — DELETE PROVIDER
-  // ============================================================
   router.delete('/sso/providers/:id', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const existing = await prisma.integrationConnection.findFirst({
-        where: { id: req.params.id, tenantId, integrationType: { startsWith: 'sso-' } },
-      });
-      if (!existing) return res.status(404).json({ success: false, error: 'SSO provider not found' });
+      const existing = await prisma.integrationConnection.findFirst({ where: { id: req.params.id, tenantId: req.user!.tenantId, integrationType: { startsWith: 'sso-' } } });
+      if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
 
       await prisma.integrationConnection.delete({ where: { id: existing.id } });
-      return res.json({ success: true, message: 'SSO provider deleted' });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed' });
-    }
+      return res.json({ success: true, message: 'Deleted' });
+    } catch (error) { return res.status(500).json({ success: false, error: 'Failed' }); }
   });
 
-  // ============================================================
-  // SCIM — SERVICE PROVIDER CONFIG
-  // ============================================================
   router.get('/scim/v2/ServiceProviderConfig', (_req: Request, res: Response) => {
-    return res.json({
-      schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
-      documentationUri: 'https://docs.vyenfita.com/scim',
-      patch: { supported: false }, bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
-      filter: { supported: true, maxResults: 1000 }, changePassword: { supported: false },
-      sort: { supported: true }, etag: { supported: false },
-      authenticationSchemes: [{ type: 'oauthbearertoken', name: 'OAuth Bearer Token', description: 'JWT Bearer token' }],
-    });
+    return res.json({ schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'], documentationUri: 'https://docs.vyenfita.com/scim', patch: { supported: false }, bulk: { supported: false }, filter: { supported: true, maxResults: 1000 }, changePassword: { supported: false }, sort: { supported: true }, etag: { supported: false }, authenticationSchemes: [{ type: 'oauthbearertoken', name: 'Bearer', description: 'JWT' }] });
   });
 
-  // ============================================================
-  // SCIM — LIST USERS
-  // ============================================================
   router.get('/scim/v2/Users', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
       const startIndex = parseInt(req.query.startIndex as string || '1', 10);
       const count = Math.min(parseInt(req.query.count as string || '100', 10), 1000);
-      const filter = req.query.filter as string | undefined;
-
-      const where: any = { tenantId, deletedAt: null };
-      if (filter) {
-        const match = filter.match(/userName eq "([^"]+)"/i);
+      const where: any = { tenantId: req.user!.tenantId, deletedAt: null };
+      
+      if (req.query.filter) {
+        const match = (req.query.filter as string).match(/userName eq "([^"]+)"/i);
         if (match) where.user = { email: match[1].toLowerCase() };
       }
 
@@ -173,89 +92,51 @@ export function createSSORouter(): Router {
       ]);
 
       const users = memberships.map((m) => ({
-        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
-        id: m.user.id, userName: m.user.email, name: { formatted: m.user.name || '' },
-        emails: [{ value: m.user.email, primary: true }],
-        active: m.status === 'active', roles: [m.role.name],
-        meta: { resourceType: 'User', created: m.user.createdAt.toISOString(), lastModified: m.user.updatedAt.toISOString() },
+        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], id: m.user.id, userName: m.user.email,
+        name: { formatted: m.user.name || '' }, emails: [{ value: m.user.email, primary: true }], active: m.status === 'active',
+        roles: [m.role.name], meta: { resourceType: 'User', created: m.user.createdAt.toISOString(), lastModified: m.user.updatedAt.toISOString() },
       }));
 
-      return res.json({
-        schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
-        totalResults: total, startIndex, itemsPerPage: users.length, Resources: users,
-      });
-    } catch (error) {
-      return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: error instanceof Error ? error.message : 'Failed', status: '500' });
-    }
+      return res.json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'], totalResults: total, startIndex, itemsPerPage: users.length, Resources: users });
+    } catch (error) { return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Failed', status: '500' }); }
   });
 
-  // ============================================================
-  // SCIM — CREATE USER
-  // ============================================================
   router.post('/scim/v2/Users', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const { userName, name, emails } = req.body;
-      const email = userName || (emails && emails[0]?.value);
+      const email = req.body.userName || (req.body.emails && req.body.emails[0]?.value);
+      if (!email) return res.status(400).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Missing email', status: '400' });
 
-      if (!email || typeof email !== 'string') return res.status(400).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'userName required', status: '400' });
-
-      const existingMembership = await prisma.membership.findFirst({ where: { tenantId, deletedAt: null, user: { email: email.toLowerCase() } } });
-      if (existingMembership) return res.status(409).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'User exists', status: '409', scimType: 'uniqueness' });
+      const existing = await prisma.membership.findFirst({ where: { tenantId: req.user!.tenantId, deletedAt: null, user: { email: email.toLowerCase() } } });
+      if (existing) return res.status(409).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Exists', status: '409' });
 
       let user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-      if (!user) user = await prisma.user.create({ data: { email: email.toLowerCase(), name: name?.formatted || name?.givenName || null, status: 'active' } });
+      if (!user) user = await prisma.user.create({ data: { email: email.toLowerCase(), name: req.body.name?.formatted || null, status: 'active' } });
 
-      let role = await prisma.role.findFirst({ where: { tenantId, name: 'Viewer' } });
-      if (!role) role = await prisma.role.create({ data: { tenantId, name: 'Viewer', description: 'Read-only', isDefault: true } });
+      let role = await prisma.role.findFirst({ where: { tenantId: req.user!.tenantId, name: 'Viewer' } });
+      if (!role) role = await prisma.role.create({ data: { tenantId: req.user!.tenantId, name: 'Viewer', isDefault: true } });
 
-      const membership = await prisma.membership.create({ data: { userId: user.id, tenantId, roleId: role.id, status: 'active', joinedAt: new Date() }, include: { user: true, role: true } });
+      const membership = await prisma.membership.create({ data: { userId: user.id, tenantId: req.user!.tenantId, roleId: role.id, status: 'active', joinedAt: new Date() }, include: { user: true, role: true } });
 
-      return res.status(201).json({
-        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
-        id: membership.user.id, userName: membership.user.email, name: { formatted: membership.user.name || '' },
-        emails: [{ value: membership.user.email, primary: true }], active: true, roles: [membership.role.name],
-        meta: { resourceType: 'User', created: membership.user.createdAt.toISOString(), lastModified: membership.user.updatedAt.toISOString() },
-      });
-    } catch (error) {
-      return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: error instanceof Error ? error.message : 'Failed', status: '500' });
-    }
+      return res.status(201).json({ schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], id: membership.user.id, userName: membership.user.email, name: { formatted: membership.user.name || '' }, emails: [{ value: membership.user.email, primary: true }], active: true, roles: [membership.role.name], meta: { resourceType: 'User' } });
+    } catch (error) { return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Failed', status: '500' }); }
   });
 
-  // ============================================================
-  // SCIM — GET USER
-  // ============================================================
   router.get('/scim/v2/Users/:id', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const membership = await prisma.membership.findFirst({ where: { tenantId, userId: req.params.id, deletedAt: null }, include: { user: true, role: true } });
-      if (!membership) return res.status(404).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Not found', status: '404' });
-
-      return res.json({
-        schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'],
-        id: membership.user.id, userName: membership.user.email, name: { formatted: membership.user.name || '' },
-        emails: [{ value: membership.user.email, primary: true }], active: membership.status === 'active', roles: [membership.role.name],
-        meta: { resourceType: 'User', created: membership.user.createdAt.toISOString(), lastModified: membership.user.updatedAt.toISOString() },
-      });
-    } catch (error) {
-      return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: error instanceof Error ? error.message : 'Failed', status: '500' });
-    }
+      const m = await prisma.membership.findFirst({ where: { tenantId: req.user!.tenantId, userId: req.params.id, deletedAt: null }, include: { user: true, role: true } });
+      if (!m) return res.status(404).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Not found', status: '404' });
+      return res.json({ schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], id: m.user.id, userName: m.user.email, name: { formatted: m.user.name || '' }, emails: [{ value: m.user.email, primary: true }], active: m.status === 'active', roles: [m.role.name], meta: { resourceType: 'User' } });
+    } catch (error) { return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Failed', status: '500' }); }
   });
 
-  // ============================================================
-  // SCIM — DELETE USER
-  // ============================================================
   router.delete('/scim/v2/Users/:id', authenticate, async (req: Request, res: Response) => {
     try {
-      const tenantId = req.user!.tenantId;
-      const membership = await prisma.membership.findFirst({ where: { tenantId, userId: req.params.id, deletedAt: null } });
-      if (!membership) return res.status(404).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Not found', status: '404' });
-
-      await prisma.membership.update({ where: { id: membership.id }, data: { status: 'inactive', deletedAt: new Date() } });
+      const m = await prisma.membership.findFirst({ where: { tenantId: req.user!.tenantId, userId: req.params.id, deletedAt: null } });
+      if (!m) return res.status(404).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Not found', status: '404' });
+      
+      await prisma.membership.update({ where: { id: m.id }, data: { status: 'inactive', deletedAt: new Date() } });
       return res.status(204).send();
-    } catch (error) {
-      return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: error instanceof Error ? error.message : 'Failed', status: '500' });
-    }
+    } catch (error) { return res.status(500).json({ schemas: ['urn:ietf:params:scim:api:messages:2.0:Error'], detail: 'Failed', status: '500' }); }
   });
 
   return router;
