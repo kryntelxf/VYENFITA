@@ -1,0 +1,79 @@
+name: Mobile Build (EAS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+
+jobs:
+  build:
+    name: EAS Build — ${{ github.event.inputs.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if mobile app exists
+        id: check
+        run: |
+          if [ -d "app/mobile" ] && [ -f "app/mobile/package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ app/mobile not found — skipping"
+          fi
+
+      - name: Check if EXPO_TOKEN is configured
+        id: token
+        run: |
+          if [ -n "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "has_token=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "⚠️ EXPO_TOKEN secret not set — skipping"
+          fi
+
+      - name: Setup Node
+        if: steps.check.outputs.exists == 'true' && steps.token.outputs.has_token == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Setup Expo CLI
+        if: steps.check.outputs.exists == 'true' && steps.token.outputs.has_token == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install mobile dependencies
+        if: steps.check.outputs.exists == 'true' && steps.token.outputs.has_token == 'true'
+        run: |
+          cd app/mobile
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Run EAS Build
+        if: steps.check.outputs.exists == 'true' && steps.token.outputs.has_token == 'true'
+        run: |
+          cd app/mobile
+          eas build --platform android --profile ${{ github.event.inputs.profile }} --non-interactive
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Mobile Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Profile:** ${{ github.event.inputs.profile }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mobile exists:** ${{ steps.check.outputs.exists }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **EXPO_TOKEN set:** ${{ steps.token.outputs.has_token }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
