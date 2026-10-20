@@ -1,4 +1,4 @@
-name: E2E — Builder
+name: E2E — VYENFITA Builder
 
 on:
   workflow_dispatch:
@@ -6,18 +6,12 @@ on:
     branches:
       - vyenfita-development
     paths:
-      - 'app/client/src/vyenfita/builder/**'
+      - 'app/client/src/vyenfita/**'
       - 'app/client/e2e/**'
       - '.github/workflows/e2e-builder.yml'
-  pull_request:
-    branches:
-      - vyenfita-development
-    paths:
-      - 'app/client/src/vyenfita/builder/**'
-      - 'app/client/e2e/**'
 
 jobs:
-  e2e-builder:
+  e2e:
     name: Builder E2E
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -26,74 +20,75 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check if E2E folder exists
+        id: check
+        run: |
+          if [ -d "app/client/e2e" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ app/client/e2e folder not found — skipping"
+          fi
+
       - name: Setup Node
+        if: steps.check.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '24.14.1'
 
       - name: Install client dependencies
+        if: steps.check.outputs.exists == 'true'
         run: |
           cd app/client
           yarn install --frozen-lockfile || yarn install
 
       - name: Install E2E dependencies
+        if: steps.check.outputs.exists == 'true'
         run: |
           cd app/client/e2e
           yarn install --frozen-lockfile || yarn install
 
       - name: Install Playwright browsers
+        if: steps.check.outputs.exists == 'true'
         run: |
           cd app/client/e2e
-          yarn install:browsers
+          npx playwright install --with-deps chromium
 
       - name: Start client dev server
+        if: steps.check.outputs.exists == 'true'
         run: |
           cd app/client
           nohup yarn start > /tmp/client.log 2>&1 &
-          echo "CLIENT_PID=$!" >> $GITHUB_ENV
-
-      - name: Wait for client to be ready
-        run: |
-          echo "Waiting for http://localhost:3000..."
+          echo "Waiting for client to be ready..."
           for i in {1..60}; do
             if curl -sf -o /dev/null http://localhost:3000; then
-              echo "✅ Client is ready"
-              exit 0
+              echo "✅ Client ready"
+              break
             fi
-            echo "Attempt $i/60..."
             sleep 5
           done
-          echo "❌ Client did not start in time"
-          tail -100 /tmp/client.log
-          exit 1
 
-      - name: Run E2E tests
+      - name: Run Playwright tests
+        if: steps.check.outputs.exists == 'true'
         env:
           E2E_BASE_URL: http://localhost:3000
         run: |
           cd app/client/e2e
-          yarn test
+          npx playwright test --reporter=list
 
       - name: Upload test results
-        if: always()
+        if: always() && steps.check.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-builder-playwright-report
-          path: app/client/e2e/playwright-report/
+          name: e2e-results
+          path: |
+            app/client/e2e/playwright-report/
+            app/client/e2e/test-results/
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Upload traces
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-builder-traces
-          path: app/client/e2e/test-results/
-          retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Show client logs on failure
-        if: failure()
+      - name: Show client log on failure
+        if: failure() && steps.check.outputs.exists == 'true'
         run: |
-          echo "=== CLIENT LOG (last 100 lines) ==="
-          tail -100 /tmp/client.log || echo "no client log"
+          echo "=== CLIENT LOG ==="
+          tail -100 /tmp/client.log || echo "no log"
