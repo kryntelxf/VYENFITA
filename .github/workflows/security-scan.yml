@@ -13,7 +13,7 @@ on:
 
 jobs:
   audit:
-    name: Dependency Audit (app/ai)
+    name: Dependency Audit + Secret Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -40,7 +40,7 @@ jobs:
           echo "=== SUMMARY ==="
           grep -E "(Severity|Vulnerabilities|high|critical)" /tmp/audit.log | tail -20 || true
 
-      - name: Check for secrets in code
+      - name: Scan for common secret patterns
         run: |
           echo "=== SCANNING FOR COMMON SECRET PATTERNS ==="
           patterns=(
