@@ -21,6 +21,16 @@ import { createTenantRouter } from './routes/tenant.routes';
 import { createAuditRouter } from './routes/audit.routes';
 import { createSearchRouter } from './routes/search.routes';
 import { createWebhookRouter } from './routes/webhook.routes';
+import { createAnalyticsAdvancedRouter } from './routes/analytics-advanced.routes';
+import { createBillingRouter } from './routes/billing.routes';
+import { createOrganizationRouter } from './routes/organization.routes';
+import { createCredentialsRouter } from './routes/credentials.routes';
+import { createEnvironmentRouter } from './routes/environment.routes';
+import { createPipelineRouter } from './routes/pipeline.routes';
+import { createCommentsRouter } from './routes/comments.routes';
+import { createDashboardRouter } from './routes/dashboard.routes';
+import { createIntegrationsOAuthRouter } from './routes/integrations-oauth.routes';
+import { createMonitoringRouter } from './routes/monitoring.routes';
 
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
@@ -65,9 +75,6 @@ app.post('/api/v1/auth/login', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// ============================================================
-// MODULE ROUTES
-// ============================================================
 app.use('/', createObservabilityRouter());
 app.use('/api/v1/applications', createApplicationRouter());
 app.use('/api/v1/workflows', createWorkflowRouter());
@@ -84,6 +91,18 @@ app.use('/api/v1/tenant', createTenantRouter());
 app.use('/api/v1/audit', createAuditRouter());
 app.use('/api/v1/search', createSearchRouter());
 app.use('/api/v1/webhooks', createWebhookRouter());
+
+// NEW ROUTERS
+app.use('/api/v1/analytics-advanced', createAnalyticsAdvancedRouter());
+app.use('/api/v1/billing', createBillingRouter());
+app.use('/api/v1/organization', createOrganizationRouter());
+app.use('/api/v1/credentials', createCredentialsRouter());
+app.use('/api/v1/environments', createEnvironmentRouter());
+app.use('/api/v1/pipelines', createPipelineRouter());
+app.use('/api/v1/comments', createCommentsRouter());
+app.use('/api/v1/dashboards', createDashboardRouter());
+app.use('/api/v1/oauth', createIntegrationsOAuthRouter());
+app.use('/api/v1/monitoring', createMonitoringRouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
