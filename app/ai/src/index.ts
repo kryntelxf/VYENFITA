@@ -12,6 +12,7 @@ import { createAnalyticsRouter } from './routes/analytics.routes';
 import { createMarketplaceRouter } from './routes/marketplace.routes';
 import { createAgentRouter } from './routes/agent.routes';
 import { createIntegrationRouter } from './routes/integration.routes';
+import { createSSORouter } from './routes/sso.routes';
 
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
@@ -103,6 +104,9 @@ app.use('/api/v1/analytics', createAnalyticsRouter());
 app.use('/api/v1/marketplace', createMarketplaceRouter());
 app.use('/api/v1/agents', createAgentRouter());
 app.use('/api/v1/integrations', createIntegrationRouter());
+
+// SSO + SCIM (mounted at /api/v1)
+app.use('/api/v1', createSSORouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
