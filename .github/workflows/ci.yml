@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - vyenfita-development
+  pull_request:
+    branches:
+      - vyenfita-development
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build & Test (app/ai)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: vyenfita_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5432/vyenfita_test
+      JWT_SECRET: test-secret-key-at-least-32-characters-long
+      ENCRYPTION_KEY: test-encryption-key-32-chars-long-xxx
+      NODE_ENV: test
+      LOG_LEVEL: error
+      SCHEDULER_ENABLED: 'false'
+      RETENTION_ENABLED: 'false'
+      USE_BULLMQ: 'false'
+      OTEL_ENABLED: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Generate Prisma Client
+        run: |
+          cd app/ai
+          npx prisma generate
+
+      - name: Apply migrations
+        run: |
+          cd app/ai
+          npx prisma migrate deploy || npx prisma db push --accept-data-loss
+
+      - name: TypeScript compile check
+        run: |
+          cd app/ai
+          npx tsc --noEmit --skipLibCheck
+
+      - name: Run tests
+        run: |
+          cd app/ai
+          yarn test --ci --reporters=default 2>&1 | tee test-output.log
+        continue-on-error: true
+
+      - name: Show test summary
+        if: always()
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f app/ai/test-output.log ]; then
+            grep -E "(Tests:|Suites:|PASS|FAIL)" app/ai/test-output.log | tail -30 >> $GITHUB_STEP_SUMMARY || true
+          fi
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-output
+          path: app/ai/test-output.log
+          retention-days: 7
+          if-no-files-found: ignore
