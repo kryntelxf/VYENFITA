@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import { prisma } from './lib/database/client';
 import { PasswordService } from './lib/auth/password';
 import { TokenService } from './lib/auth/token';
+
+// ─── IMPORT ROUTERS ──────────────────────────────────────────
 import { createApplicationRouter } from './routes/application.routes';
 import { createWorkflowRouter } from './routes/workflow.routes';
 import { createAIRouter } from './routes/ai.routes';
@@ -44,6 +46,16 @@ import { createAPIKeysRouter } from './routes/api-keys.routes';
 import { createWebhooksOutboundRouter } from './routes/webhooks-outbound.routes';
 import { createSupportTicketsRouter } from './routes/support-tickets.routes';
 
+// NEW IMPORTS
+import { createPluginsRouter } from './routes/plugins.routes';
+import { createMarketplaceAdvancedRouter } from './routes/marketplace-advanced.routes';
+import { createAnalyticsExportRouter } from './routes/analytics-export.routes';
+import { createDataImportAdvancedRouter } from './routes/data-import-advanced.routes';
+import { createHealthDetailedRouter } from './routes/health-detailed.routes';
+import { createMFARouter } from './routes/auth-mfa.routes';
+import { createAuthOAuthRouter } from './routes/auth-oauth.routes';
+import { createTenantBillingInvoicesRouter } from './routes/tenant-billing-invoices.routes';
+
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
 const host = process.env.AI_SERVICE_HOST || '0.0.0.0';
@@ -59,6 +71,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
     if (!PasswordService.validate(password).valid) return res.status(400).json({ error: 'Weak password' });
     const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
     if (existing) return res.status(409).json({ error: 'Email exists' });
+    
     const passwordHash = await PasswordService.hash(password);
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({ data: { email: email.toLowerCase(), passwordHash, name, status: 'active' } });
@@ -67,6 +80,7 @@ app.post('/api/v1/auth/register', async (req, res) => {
       await tx.membership.create({ data: { userId: user.id, tenantId: tenant.id, roleId: role.id, status: 'active', joinedAt: new Date() } });
       return { user, tenant };
     });
+    
     const tokens = TokenService.generateTokenPair({ userId: result.user.id, email: result.user.email, tenantId: result.tenant.id });
     await prisma.session.create({ data: { userId: result.user.id, token: tokens.accessToken, expiresAt: new Date(Date.now() + 30*24*60*60*1000) } });
     res.status(201).json({ success: true, data: { user: { id: result.user.id }, tenant: { id: result.tenant.id }, tokens: { accessToken: tokens.accessToken } } });
@@ -81,12 +95,14 @@ app.post('/api/v1/auth/login', async (req, res) => {
     if (!user || !user.passwordHash || !(await PasswordService.verify(password, user.passwordHash))) return res.status(401).json({ error: 'Invalid credentials' });
     const membership = await prisma.membership.findUnique({ where: { userId_tenantId: { userId: user.id, tenantId } } });
     if (!membership) return res.status(401).json({ error: 'Not a member' });
+    
     const tokens = TokenService.generateTokenPair({ userId: user.id, email: user.email, tenantId: membership.tenantId });
     await prisma.session.create({ data: { userId: user.id, token: tokens.accessToken, expiresAt: new Date(Date.now() + 30*24*60*60*1000) } });
     res.json({ success: true, data: { tokens: { accessToken: tokens.accessToken } } });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// ─── MOUNT ROUTERS ───────────────────────────────────────────
 app.use('/', createObservabilityRouter());
 app.use('/api/v1/applications', createApplicationRouter());
 app.use('/api/v1/workflows', createWorkflowRouter());
@@ -96,6 +112,7 @@ app.use('/api/v1/marketplace', createMarketplaceRouter());
 app.use('/api/v1/agents', createAgentRouter());
 app.use('/api/v1/integrations', createIntegrationRouter());
 app.use('/api/v1', createSSORouter());
+
 app.use('/api/v1/deployments', createDeploymentRouter());
 app.use('/api/v1/versioning', createVersioningRouter());
 app.use('/api/v1', createExportImportRouter());
@@ -114,7 +131,6 @@ app.use('/api/v1/dashboards', createDashboardRouter());
 app.use('/api/v1/oauth', createIntegrationsOAuthRouter());
 app.use('/api/v1/monitoring', createMonitoringRouter());
 
-// NEW ROUTERS
 app.use('/api/v1/agents-advanced', createAIAgentsAdvancedRouter());
 app.use('/api/v1/i18n', createMultiLanguageRouter());
 app.use('/api/v1/gdpr', createDataExportRouter());
@@ -128,8 +144,19 @@ app.use('/api/v1/api-keys', createAPIKeysRouter());
 app.use('/api/v1/outbound-webhooks', createWebhooksOutboundRouter());
 app.use('/api/v1/support', createSupportTicketsRouter());
 
-app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+// FINAL BATCH
+app.use('/api/v1/plugins', createPluginsRouter());
+app.use('/api/v1/marketplace-advanced', createMarketplaceAdvancedRouter());
+app.use('/api/v1/analytics-export', createAnalyticsExportRouter());
+app.use('/api/v1/data-import', createDataImportAdvancedRouter());
+app.use('/', createHealthDetailedRouter());
+app.use('/api/v1/auth/mfa', createMFARouter());
+app.use('/api/v1/auth/oauth', createAuthOAuthRouter());
+app.use('/api/v1/billing/invoices', createTenantBillingInvoicesRouter());
+
+app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 
 app.listen(port, host, () => {
   console.log(`🚀 VYENFITA API running on port ${port}`);
+  console.log(`   Mode: ALL ROUTERS MOUNTED`);
 });
