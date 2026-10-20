@@ -1,34 +1,34 @@
-/**
- * VYENFITA Observability Routes
- * 
- * Public routes for monitoring:
- * - /metrics (Prometheus)
- * - /health (health check)
- * - /health/liveness
- * - /health/readiness
- * 
- * @version 1.0.0
- */
-
-import { Router } from 'express';
-import { ObservabilityController } from '../controllers/observability.controller';
+import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/database/client';
+import { authenticate } from '../lib/auth/middleware';
 
 export function createObservabilityRouter(): Router {
   const router = Router();
-  const controller = new ObservabilityController();
+  const startTime = Date.now();
+  let requestCount = 0;
 
-  // Prometheus scrape endpoint
-  router.get('/metrics', (req, res) => controller.metrics(req, res));
+  router.use((_req, _res, next) => { requestCount++; next(); });
 
-  // Health checks
-  router.get('/health', (req, res) => controller.health(req, res));
-  router.get('/health/liveness', (req, res) => controller.liveness(req, res));
-  router.get('/health/readiness', (req, res) => controller.readiness(req, res));
+  router.get('/health/liveness', (_req: Request, res: Response) => {
+    return res.json({ status: 'alive', uptimeSeconds: Math.floor((Date.now() - startTime) / 1000), timestamp: new Date().toISOString() });
+  });
 
-  // Debug tracing (dev only)
-  if (process.env.NODE_ENV !== 'production') {
-    router.get('/debug/traces', (req, res) => controller.traces(req, res));
-  }
+  router.get('/health/readiness', async (_req: Request, res: Response) => {
+    const checks: Record<string, string> = {};
+    let allOk = true;
+    try { await prisma.$queryRaw`SELECT 1`; checks.database = 'ok'; } 
+    catch { checks.database = 'fail'; allOk = false; }
+    return res.status(allOk ? 200 : 503).json({ status: allOk ? 'ready' : 'not_ready', checks, timestamp: new Date().toISOString() });
+  });
+
+  router.get('/metrics', (_req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+    res.send(`# HELP vyenfita_requests_total Total requests\n# TYPE vyenfita_requests_total counter\nvyenfita_requests_total ${requestCount}\n# HELP vyenfita_uptime_seconds Uptime\n# TYPE vyenfita_uptime_seconds gauge\nvyenfita_uptime_seconds ${Math.floor((Date.now() - startTime) / 1000)}\n`);
+  });
+
+  router.get('/debug/traces', authenticate, (_req: Request, res: Response) => {
+    return res.json({ success: true, data: { enabled: process.env.OTEL_ENABLED === 'true', mode: 'in-memory', requestCount, uptimeSeconds: Math.floor((Date.now() - startTime) / 1000) } });
+  });
 
   return router;
-             }
+                      }
