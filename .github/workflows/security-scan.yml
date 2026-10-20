@@ -1,0 +1,75 @@
+name: Security Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+  push:
+    branches:
+      - vyenfita-development
+    paths:
+      - 'app/ai/package.json'
+      - 'app/ai/yarn.lock'
+
+jobs:
+  audit:
+    name: Dependency Audit (app/ai)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install dependencies
+        run: |
+          cd app/ai
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Run yarn audit (high severity)
+        run: |
+          cd app/ai
+          echo "=== HIGH SEVERITY VULNERABILITIES ==="
+          yarn audit --level high 2>&1 | tee /tmp/audit.log || true
+          echo ""
+          echo "=== SUMMARY ==="
+          grep -E "(Severity|Vulnerabilities|high|critical)" /tmp/audit.log | tail -20 || true
+
+      - name: Check for secrets in code
+        run: |
+          echo "=== SCANNING FOR COMMON SECRET PATTERNS ==="
+          patterns=(
+            "sk-[a-zA-Z0-9]{20,}"
+            "AKIA[0-9A-Z]{16}"
+            "ghp_[a-zA-Z0-9]{36}"
+            "xoxb-[0-9a-zA-Z-]+"
+          )
+          found=0
+          for pattern in "${patterns[@]}"; do
+            matches=$(grep -rE "$pattern" app/ai/src --include="*.ts" --include="*.js" 2>/dev/null | head -5 || true)
+            if [ -n "$matches" ]; then
+              echo "⚠️ Potential secret found (pattern: $pattern):"
+              echo "$matches"
+              found=$((found+1))
+            fi
+          done
+          if [ $found -eq 0 ]; then
+            echo "✅ No hardcoded secrets detected"
+          else
+            echo "⚠️ Found $found potential secret pattern(s) — review manually"
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dependency audit:** see logs above" >> $GITHUB_STEP_SUMMARY
+          echo "**Secret scan:** see logs above" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ This is a basic automated scan. A full penetration test requires external review." >> $GITHUB_STEP_SUMMARY
