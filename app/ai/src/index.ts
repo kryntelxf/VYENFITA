@@ -11,6 +11,7 @@ import { createAIRouter } from './routes/ai.routes';
 import { createAnalyticsRouter } from './routes/analytics.routes';
 import { createMarketplaceRouter } from './routes/marketplace.routes';
 import { createAgentRouter } from './routes/agent.routes';
+import { createIntegrationRouter } from './routes/integration.routes';
 
 const app = express();
 const port = parseInt(process.env.AI_SERVICE_PORT || '3001', 10);
@@ -92,12 +93,16 @@ app.post('/api/v1/auth/login', async (req, res) => {
   }
 });
 
+// ============================================================
+// MODULE ROUTES
+// ============================================================
 app.use('/api/v1/applications', createApplicationRouter());
 app.use('/api/v1/workflows', createWorkflowRouter());
 app.use('/api/v1/ai', createAIRouter());
 app.use('/api/v1/analytics', createAnalyticsRouter());
 app.use('/api/v1/marketplace', createMarketplaceRouter());
 app.use('/api/v1/agents', createAgentRouter());
+app.use('/api/v1/integrations', createIntegrationRouter());
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
